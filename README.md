@@ -2,8 +2,6 @@
   <img src="AirLink Logo.svg" width="600" alt="AirLink Serial 56K Logo">
 </p>
 
-<h1 align="center">AirLink Serial 56K - Super Micro Modem</h1>
-
 <p align="center">
   <strong>ESP32-C3 기반 IBM PC 전용 고품질 WiFi 모뎀 에뮬레이터 (한국어 지원!)</strong><br>
   <em>Based on <a href="https://github.com/bozimmerman/Zimodem">Zimodem 4.0</a> by Bo Zimmerman</em>
@@ -12,7 +10,7 @@
 ---
 
 ## 📌 Overview
-**AirLink Serial 56K**는 Zimodem 펌웨어를 기반으로 최적화와 수정, 개선을 거친 WiFi 모뎀 펌웨어입니다. 레트로 IBM PC 환경에 완벽하게 호환되도록 설계되었으며, **ESP32-C3** 칩셋의 성능을 활용하여 실제 모뎀의 감성적인 사운드와 현대적인 편의성(VT100 메뉴, 한글 지원 등)을 동시에 제공합니다.
+**AirLink 56K**는 Zimodem 펌웨어를 기반으로 최적화와 수정, 개선을 거친 WiFi 모뎀 펌웨어입니다. 레트로 IBM PC 환경에 완벽하게 호환되도록 설계되었으며, **ESP32-C3** 칩셋의 성능을 활용하여 실제 모뎀의 감성적인 사운드와 현대적인 편의성(VT100 메뉴, 한글 지원 등)을 동시에 제공합니다.
 
 ## ✨ Key Modifications & Features
 * **최신 개발 환경 대응**: 최신 Arduino IDE, ESP-IDF v5.0 이상 대응
