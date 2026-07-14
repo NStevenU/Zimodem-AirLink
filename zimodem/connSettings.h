@@ -13,6 +13,8 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
+#include "serout.h"  // FlowControlType 정의를 위해 필요
+
 enum ConnFlag
 {
   FLAG_DISCONNECT_ON_EXIT=1,

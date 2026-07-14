@@ -1,4 +1,6 @@
 #if INCLUDE_PPP
+#include "lwip/tcpip.h"
+#include "lwip/sys.h"
 
 static const uint16_t fcstab[256] = {
   0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
@@ -485,9 +487,11 @@ void ZPPPMode::switchTo()
   debugPrintf("PPP: Using WiFi Gateway: %s\n", ip4addr_ntoa(&gw));
   debugPrintf("PPP: Using WiFi Netmask: %s\n", ip4addr_ntoa(&netmask));
 
+  LOCK_TCPIP_CORE();
   netif_add(&ppp_netif, &ipaddr, &netmask, &gw, NULL, ppp_netif_init, ip_input);
   netif_set_up(&ppp_netif);
   netif_set_link_up(&ppp_netif);
+  UNLOCK_TCPIP_CORE();
 
   currMode = &pppMode;
   debugPrintf("PPP mode active\n\r");

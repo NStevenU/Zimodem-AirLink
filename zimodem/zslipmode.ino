@@ -1,4 +1,6 @@
 #if INCLUDE_SLIP
+#include "lwip/tcpip.h"
+#include "lwip/sys.h"
 /*
    Copyright 2022-2026 Bo Zimmerman
 
@@ -262,9 +264,11 @@ void ZSLIPMode::switchTo()
   debugPrintf("SLIP: Using WiFi Gateway: %s\n", ip4addr_ntoa(&gw));
   debugPrintf("SLIP: Using WiFi Netmask: %s\n", ip4addr_ntoa(&netmask));
 
+  LOCK_TCPIP_CORE();
   netif_add(&slip_netif, &ipaddr, &netmask, &gw, NULL, slip_netif_init, ip_input);
   netif_set_up(&slip_netif);
   netif_set_link_up(&slip_netif);
+  UNLOCK_TCPIP_CORE();
 
   currMode = &slipMode;
   debugPrintf("SLIP mode active\n\r");

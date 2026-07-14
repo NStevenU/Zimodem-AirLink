@@ -14,6 +14,8 @@
    limitations under the License.
 */
 
+#include <FS.h>  // defines File type
+
 enum LogOutputState
 {
   LOS_NADA=0,
