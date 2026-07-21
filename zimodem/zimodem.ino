@@ -14,7 +14,7 @@
    limitations under the License.
 */
 // #define TCP_SND_BUF                     4 * TCP_MSS
-#define ZIMODEM_VERSION "1.14"
+#define ZIMODEM_VERSION "1.15"
 const char compile_date[] = __DATE__ " " __TIME__;
 #define DEFAULT_NO_DELAY true
 #define null 0
@@ -336,7 +336,7 @@ static int getDefaultCtsPin() { return DEFAULT_PIN_CTS; }
 static void doNothing(const char *format, ...) {}
 
 static void s_pinWrite(uint8_t pinNo, uint8_t value) {
-  if (pinSupport[pinNo]) {
+  if (pinNo < MAX_PIN_NO && pinSupport[pinNo]) {
     pinCache[pinNo] = value;
     digitalWrite(pinNo, value);
   }
@@ -357,16 +357,16 @@ static void setHostName(const char *hname) {
 static void setNewStaticIPs(IPAddress *ip, IPAddress *dns, IPAddress *gateWay,
                             IPAddress *subNet) {
   if (staticIP != null)
-    free(staticIP);
+    delete staticIP;
   staticIP = ip;
   if (staticDNS != null)
-    free(staticDNS);
+    delete staticDNS;
   staticDNS = dns;
   if (staticGW != null)
-    free(staticGW);
+    delete staticGW;
   staticGW = gateWay;
   if (staticSN != null)
-    free(staticSN);
+    delete staticSN;
   staticSN = subNet;
 }
 

@@ -341,15 +341,21 @@ static void snd_task_fn(void *param) {
     // 2. 메인 태스크에 "다이얼 완료, 접속 결과 줘" 신호
     snd_state = SND_WAIT_RESULT;
 
-    // 3. 메인 태스크가 접속 결과를 알려줄 때까지 대기
-    while (snd_state == SND_WAIT_RESULT)
+    // 3. 메인 태스크가 접속 결과를 알려줄 때까지 대기 (최대 30초 타임아웃)
+    uint32_t wait_start = millis();
+    while (snd_state == SND_WAIT_RESULT) {
+      if (millis() - wait_start > 30000) { // 30초 타임아웃
+        snd_state = SND_DONE;
+        break;
+      }
       delay(10);
+    }
 
     // 4. 결과에 따라 재생
     if (snd_state == SND_HANDSHAKE) {
       snd_ringback_tone();
       snd_handshake_sequence();
-    } else { // SND_BUSY
+    } else if (snd_state == SND_BUSY) {
       snd_busy_tone();
     }
   }

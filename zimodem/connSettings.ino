@@ -68,7 +68,6 @@ int ConnSettings::getBitmap(FlowControlType forceCheck)
 String ConnSettings::getFlagString()
 {
   String lastOptions =(petscii?"p":"");
-  lastOptions += (petscii?"p":"");
   lastOptions += (telnet?"t":"");
   lastOptions += (echo?"e":"");
   lastOptions += (xonxoff?"x":"");
@@ -105,12 +104,16 @@ void ConnSettings::IPtoStr(IPAddress *ip, String &str)
 
 IPAddress *ConnSettings::parseIP(const char *ipStr)
 {
+  if(ipStr == null || strlen(ipStr)<7)
+    return null;
+  char copyBuf[64];
+  strncpy(copyBuf, ipStr, sizeof(copyBuf)-1);
+  copyBuf[sizeof(copyBuf)-1] = 0;
+
   uint8_t dots[4];
   int dotDex=0;
-  char *le = (char *)ipStr;
-  const char *ld = ipStr+strlen(ipStr);
-  if(strlen(ipStr)<7)
-    return null;
+  char *le = copyBuf;
+  const char *ld = copyBuf + strlen(copyBuf);
   for(char *e=le;e<=ld;e++)
   {
     if((*e=='.')||(e==ld))

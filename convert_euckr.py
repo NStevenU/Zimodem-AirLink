@@ -86,7 +86,7 @@ def process_file(filepath):
     return False
 
 if __name__ == '__main__':
-    directory = '/Users/kimtaeheon/Documents/GitHub/Zimodem/zimodem'
+    directory = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'zimodem')
     for root, _, files in os.walk(directory):
         for file in files:
             if file.endswith(('.ino', '.cpp', '.h')):

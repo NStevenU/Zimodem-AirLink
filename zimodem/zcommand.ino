@@ -1577,7 +1577,7 @@ ZResult ZCommand::doWiFiCommand(int vval, uint8_t *vbuf, int vlen,
             ip[i] = ConnSettings::parseIP(comPos[i] + 1);
             if (ip[i] == null) {
               while (--i >= 0) {
-                free(ip[i]);
+                delete ip[i];
                 ip[i] = null;
               }
               break;
@@ -1605,7 +1605,7 @@ ZResult ZCommand::doWiFiCommand(int vval, uint8_t *vbuf, int vlen,
     if (!connSuccess) {
       for (int ii = 0; ii < 4; ii++) {
         if (ip[ii] != null)
-          free(ip[ii]);
+          delete ip[ii];
       }
       return ZERROR;
     } else {
@@ -1696,7 +1696,7 @@ ZResult ZCommand::doDialStreamCommand(unsigned long vval, uint8_t *vbuf,
       strcpy((char *)vbuf, phb->address);
       ZResult res =
           doDialStreamCommand(0, vbuf, addrLen, false, phb->modifiers);
-      free(vbuf);
+      delete[] vbuf;
       return res;
     }
 #if INCLUDE_SLIP

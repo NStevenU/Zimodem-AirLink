@@ -192,7 +192,7 @@ bool handleAsciiIAC(char *c, Stream *stream)
         buf[1]=TELNET_SB;
         buf[2]=TELNET_TERMTYPE;
         buf[3]=(uint8_t)0;
-        sprintf((char *)buf+4,termType.c_str());
+        sprintf((char *)buf+4, "%s", termType.c_str());
         buf[respLen-2]=TELNET_IAC;
         buf[respLen-1]=TELNET_SE;
         for(int i=0;i<respLen;i++)

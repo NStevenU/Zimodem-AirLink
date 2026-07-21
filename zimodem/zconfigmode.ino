@@ -716,11 +716,19 @@ void ZConfig::loop() {
 
       // ── 메뉴 항목 출력 람다 ────────────────────────────────────
       auto menuLine = [&](const char *lbl, const char *desc, const char *val) {
-        char vis[128];
-        snprintf(vis, sizeof(vis), "  %-10s  %s%s", lbl, desc, val);
-        // EUC-KR 문자는 1글자당 2바이트를 차지하므로, 문자열 길이(strlen)가 곧
-        // 터미널의 표시 너비(2칸)와 대략 일치합니다.
-        int visLen = strlen(vis);
+        int fixedLen = 14 + strlen(desc);
+        int maxValLen = IW - fixedLen;
+        if (maxValLen < 0)
+          maxValLen = 0;
+
+        char valBuf[128];
+        strncpy(valBuf, val ? val : "", sizeof(valBuf) - 1);
+        valBuf[sizeof(valBuf) - 1] = '\0';
+        if ((int)strlen(valBuf) > maxValLen) {
+          valBuf[maxValLen] = '\0';
+        }
+
+        int visLen = fixedLen + strlen(valBuf);
         int pad = IW - visLen;
         if (pad < 0)
           pad = 0;
@@ -732,7 +740,7 @@ void ZConfig::loop() {
         serial.prints(VL);
         serial.printf("  %s", desc);
         serial.prints(TL);
-        serial.prints(val);
+        serial.prints(valBuf);
         serial.prints(VL);
         for (int i = 0; i < pad; i++)
           serial.prints(" ");
