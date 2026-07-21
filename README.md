@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>ESP32-C3 기반 IBM PC 전용 고품질 WiFi 모뎀 에뮬레이터 (한국어 지원!)</strong><br>
+  <strong>ESP32-C3 기반 IBM PC Serial - WiFi 모뎀 에뮬레이터 (한국어 지원!)</strong><br>
   <em>Based on <a href="https://github.com/bozimmerman/Zimodem">Zimodem 4.0</a> by Bo Zimmerman</em>
 </p>
 
@@ -30,6 +30,128 @@
 * **완벽한 한국어(EUC-KR) 지원**: 설정 메뉴 및 출력 메시지에서 영어/한국어 선택 기능 추가
 * **사용자 편의성 강화**: 자체 도움말 기능(`AT+HELP`) 및 기타 마이너 편의 기능 탑재
 * **한국 맞춤 최적화**: 인터넷 연결 기능인 SLIP, PPP기능의 가상번호를 PC통신 느낌이 나도록 014XY로 바꾸어, 01480, 01481로 수정
+* **완벽한 Windows 9X PPP 호환성**: 
+  * 기존 펌웨어에 없던 PAP(Password Authentication Protocol) 인증 로직을 자체적으로 완전 신규 구현하여 "사용자 이름 및 암호 확인 중" 화면에서 멈추는 고질적 문제 해결
+  * IPCP(IP Control Protocol) 교섭 과정에서 모뎀과 윈도우 간의 IP 할당 충돌(Conflict) 방지 알고리즘 적용 및 NAK/REJ 핸들링 추가
+* **레트로 모뎀 속도 완벽 에뮬레이션 (QoS 대역폭 제한)**:
+  * Token Bucket 알고리즘을 도입하여 56K, 33.6K, 28.8K, 14.4K, 9.6K, 2.4K 등 과거 전화선 모뎀 특유의 병목 현상과 느린 전송 속도를 완벽하게 재현 (PPP, SLIP, 일반 Stream 모드 전체에 일괄 적용, 물론 무제한(0)으로 설정하여 최고속도로 사용가능)
+* **상태 표시(Status) LED 기능 활성화**:
+  * ESP32-C3 하드웨어 핀 맵핑을 전면 재정비하고, 직관적인 상태 파악을 위한 3개의 LED(PWR 전원, WIFI 연결 상태, RX/TX 데이터 송수신) 깜빡임 기능 추가
+* **USB 비상 디버그 콘솔 (Emergency Backdoor)**:
+  * 본선 시리얼 터미널이 먹통이 되었을 때 칩의 USB 포트(115200bps)로 직접 연결하여 하드웨어 강제 재부팅(`RESET`), 속도 강제 복구(`BAUD=`), 공장 초기화(`FACTORY`) 등을 수행할 수 있는 비상 커맨드 시스템 구축
+
+## 🔌 Hardware Configuration (AirLink ESP32-C3 Pinout)
+
+기존 범용 ESP32에 맞춰져 있던 핀 배열을 AirLink 하드웨어(ESP32-C3)에 최적화하여 새롭게 맵핑했습니다. 모뎀 터미널 프로그램 설정 시 아래의 기본값을 참고하세요.
+
+### 1. 시리얼 통신 기본 설정 (Default Serial Settings)
+* **기본 모뎀 통신 포트 (UART0)**
+  * **기본 속도 (Baud Rate)**: `115200 bps` 
+  * **통신 포맷**: `8-N-1` (8 Data bits, No Parity, 1 Stop bit)
+  * **흐름 제어 (Flow Control)**: `소프트웨어 방식 (XON/XOFF)`이 기본으로 활성화되어 있으며, 필요시 `AT&K` 명령어, 또는 `AT+CONFIG` 메뉴에서 하드웨어(RTS/CTS) 제어로 변경할 수 있습니다.
+* **USB 비상 디버그 포트 (USB CDC)**
+  * 기기를 컴퓨터에 직접 USB로 연결하면 **비상 콘솔(115200 bps)** 에 접속할 수 있습니다. 메인 통신이 설정 오류로 먹통이 될 경우, 이 포트를 통해 `BAUD=`, `FACTORY`, `RESET` 등의 복구 명령을 내릴 수 있습니다.
+
+### 2. ESP32-C3 핀 맵핑 (Pin Map)
+사용자 커스텀 보드를 제작하거나 모듈을 직접 배선할 경우 아래의 핀 배열을 준수해야 합니다.
+
+| 기능 (Function) | 설명 (Description) | GPIO 번호 (ESP32-C3) |
+|:---:|---|:---:|
+| **TXD** | UART Transmit Data (PC 수신) | `기본 UART0 TX (GPIO 21)` |
+| **RXD** | UART Receive Data (PC 송신) | `기본 UART0 RX (GPIO 20)` |
+| **DCD** | Data Carrier Detect | `GPIO 8` |
+| **DTR** | Data Terminal Ready | `GPIO 5` |
+| **DSR** | Data Set Ready | `GPIO 4` |
+| **RTS** | Request To Send | `GPIO 2` |
+| **CTS** | Clear To Send | `GPIO 3` |
+| **RI** | Ring Indicator | `GPIO 1` |
+| **SND** | 오디오 출력 (Buzzer/Speaker) | `GPIO 6` |
+| **WIFI LED** | WiFi 연결 상태 표시 (Active LOW) | `GPIO 10` |
+| **RXTX LED** | 데이터 송수신 표시 (Active LOW) | `GPIO 9` |
+| **PWR LED** | 전원 표시 | 하드웨어 직결 권장 |
+| **AA/OTH** | Auto Answer / Pulse Dial 핀 | `GPIO 0` / `GPIO 7` |
+
+## 📖 사용 방법 (How to Use)
+**※ 본 가이드는 Windows 9X (사진은 Windows 95) 환경을 기준으로 작성되었습니다.**
+
+### 1. 하드웨어 연결 및 포트 기본 설정
+모뎀을 사용하기 전, 올바른 순서로 연결하고 통신 포트를 설정해야 합니다.
+
+1. **하드웨어 연결**: 먼저 AirLink 보드의 **USB-C 포트에 전원을 연결**한 후, **그 뒤에 PC와 시리얼 케이블을 연결**합니다.
+2. **장치 관리자 포트 설정**: 장치 관리자로 들어갑니다.<br/>
+   ![장치 관리자](image/1.jpg)
+3. 연결된 **COM 포트의 등록 정보(속성)** 를 엽니다.
+4. **포트 설정** 탭에서 **초당 비트 수를 `115200`** 으로, **흐름 제어를 `Xon / Xoff` (소프트웨어)** 로 변경하고 확인을 누릅니다.<br/>
+   ![포트 설정](image/2.jpg)
+
+### 2. Windows 9X 모뎀 등록 방법
+이제 설정한 통신 포트에 표준 모뎀을 등록해야 합니다.
+
+1. **제어판 -> 모뎀**을 실행하고 **`다음`** 을 누릅니다.<br/>
+   ![모뎀을 검색할려고 합니다](image/3.jpg)
+2. 자동으로 모뎀을 검색하게 두었다가, 만약 "모뎀을 찾을 수 없습니다"라고 나오면 **`다음`** 을 누릅니다.<br/>
+   ![모뎀을 찾을 수 없습니다](image/4.jpg)
+3. 제조업체 목록에서 **`표준 모뎀 형식`** 을 고르고, 모델에서 **`표준 28800 bps 모뎀`** (목록에 보이는 것 중 제일 높은 속도)을 선택합니다.<br/>
+   ![모뎀의 제조업체와 모델을 선택하십시오](image/5.jpg)
+4. 시리얼 케이블이 연결된 **포트를 선택**하고 **`다음`** 을 눌러 완료합니다.<br/>
+   ![이 모뎀에 사용할 포트를 선택하십시오](image/6.jpg)
+   <br/>
+   ![모뎀이 설치되었습니다](image/7.jpg)
+6. 모뎀 목록 창으로 돌아와서, 방금 등록된 모뎀을 선택하고 **`등록 정보`** 를 누릅니다.<br/>
+   ![모뎀 등록 정보](image/8.jpg)
+7. 일반 탭에서 **최대 속도를 `115200`** 으로 변경합니다.<br/>
+   ![최대 속도](image/9.jpg)
+8. **`연결`** 탭으로 이동하여 **`고급`** 버튼을 누릅니다.<br/>
+   ![고굽](image/10.jpg)
+9. 고급 연결 설정에서 **흐름 제어 사용**이 체크되어있는지 확인 후 **`소프트웨어 (XON/XOFF)`** 로 선택한 뒤 확인을 누릅니다.<br/>
+   ![고급 옵션 설정](image/11.jpg)
+
+### 3. 초기 부팅 후 WiFi 설정
+1. 모뎀이 준비되었다면, 터미널 프로그램(예: 새롬데이타맨, 이야기 등)을 엽니다.<br/>
+   ![새롬 데이타맨 98](image/12.jpg)
+1. 터미널에서 `AT+CONFIG`를 입력하여 대화형 설정 메뉴로 진입합니다.
+2. 메뉴에서 `w`를 입력하여 WiFi 설정으로 들어갑니다.<br/>
+   ![AT+CONFIG](image/13.jpg)
+3. SSID 네트워크 목록 번호를 입력하고, 공유기 비밀번호를 입력합니다.
+4. DHCP 설정 화면이 나타나면, `d`를 입력하여 **DHCP 사용**으로 전환(Toggle)한 뒤 엔터를 누릅니다.<br/>
+   ![WIFI 설정](image/14.jpg)
+5. 연결 성공시 `와이파이 상태:`에 SSID가 표시됩니다. `엔터`를 눌러 저장하고, `y`를 눌러 저장합니다.<br/>
+   ![최종 설정](image/15.jpg)
+
+이제 모든 준비가 끝났습니다!
+
+### 4. BBS 접속하기
+아주 쉽습니다. `ATDT"원하는 주소"`를 입력하면 됩니다.<br/>
+![BBS접속](image/16.jpg)
+
+### 5. PPP 인터넷 접속하기 (01481)
+다이얼업 네트워킹을 통해 TCP/IP 웹서핑에 접속합니다.
+
+#### [전화 접속 네트워킹 설정]
+1. **새 연결 만들기**: `전화 접속 네트워킹`에서 새로 연결을 엽니다.
+2. 사용할 모뎀을 앞서 만든 `표준 28800 bps 모뎀`으로 선택하고, 전화번호에 **`01481`**을 입력합니다.
+3. 생성된 아이콘을 우클릭하여 `속성`에 들어갑니다. 국가/지역 번호 사용을 **해제**합니다.<br/>
+   ![01481 일반](image/17.jpg)
+4. `서버 종류` 탭으로 들어갑니다.
+5. **`네트워크에 로그온`, `소프트웨어 압축 가능`, `암호화`**를 끕니다.
+6. 지원되는 네트워크 프로토콜에서 **NetBEUI, IPX/SPX 호환 체크 해제**, 오직 **TCP/IP**만 체크합니다.<br/>
+   ![01481 서버 종류](image/18.jpg)
+
+#### [인터넷 접속!]
+1. 연결 아이콘을 더블클릭합니다.
+2. 접속 창이 뜨면 사용자 이름에 **`airlink`**, 암호에 **`1111`**을 입력합니다.<br/>
+   ![연결할 대상](image/19.jpg)
+3. `연결` 버튼을 누르면 인터넷이 연결됩니다.<br/>
+   ![연결 설정 완료](image/20.jpg)
+   <br/>
+   ![IE](image/21.jpg)
+
+### 6. 기타 설정하기
+터미널에서 `AT+CONFIG`를 입력하여 대화형 설정 메뉴로 진입합니다.<br/>
+여기서 바로 **`흐름 제어`**, **`언어`**, **`포트 속도`**, **`스피커`** 등을 설정 가능합니다.<br/>
+예시로 모뎀 접속음이 시끄럽고, 딜레이 없이 바로 진입하고 싶으면 **`s`** 를 눌러 스피커를 음소거로 설정하면 됩니다.<br/>
+![AT+CONFIG](image/22.jpg)
+
 ## 🎵 Audio Engine Architecture
 
 오리지널 Zimodem 펌웨어에는 사운드 출력 기능이 아예 존재하지 않았습니다. 본 프로젝트는 사운드 기능이 전무했던 기존 코드 베이스에 **소프트웨어 기반 오디오 합성 엔진(DDS)을 새롭게 구현하고 모뎀 통신 시퀀스와 완벽하게 연동**하여, 실제 56K 모뎀의 아날로그 감성을 재현해 냈습니다.
@@ -53,6 +175,16 @@
 * **상태 기반 사운드 피드백**
   * 통신 상태(State Machine)에 따라 유기적으로 사운드가 변화합니다. (다이얼링 중 ➡️ 링백 톤 대기 ➡️ 연결 성공 시 핸드셰이크 굉음 OR 실패 시 통화 중(Busy) 톤 재생)
 
+## 🛠️ Detailed Changelog (원본 Zimodem 대비 주요 수정 파일)
+* `zimodem_sound.h` **(신규)**: 1-Bit PWM 기반 하드웨어 타이머 오디오 합성(DDS) 엔진.
+* `pet2asc.h`: ESP32-C3 하드웨어 핀 맵핑 최적화, USB CDC 디버그 시리얼 통신(`DBSerial`) 정의, EUC-KR 한글 인코딩 변환 로직 추가.
+* `zimodem.ino`: 메인 루프에 FreeRTOS 기반 사운드 재생 제어 연동, RX/TX/WIFI 상태 LED 점등 제어 추가, USB 비상 백도어 터미널 훅(Hook) 탑재.
+* `zcommand.h` / `zcommand.ino`: AT 명령어 파서 전면 수정 (`AT+QOS`, `AT+CONFIG` 등), 한국어 번역 텍스트 적용, 모뎀 발신 시 사운드 트리거 로직 적용.
+* `zconfigmode.h` / `zconfigmode.ino`: 대화형 설정 UI(`AT+CONFIG`)를 VT100 기반으로 재설계, 단축키 UI/UX 개편, 대역폭(QoS) 및 사운드 설정 메뉴 추가.
+* `zpppmode.h` / `zpppmode.ino`: Windows 95 PAP 접속 인증(Authentication) 구현, 모뎀(Server)과 클라이언트(Win95) 간의 IP 할당 프로세스 규격화 및 IPCP 충돌 방지, Token Bucket 알고리즘을 이용한 QoS 속도 제한(Throttling) 구현.
+* `zslipmode.ino`: SLIP 모드 연결 시 Token Bucket 기반 QoS 속도 제한 구현.
+* `zstream.ino`: 일반 ATDT 통신 모드(BBS) 시에도 Token Bucket 기반 속도 제한(QoS) 적용.
+
 ## 🛠️ Hardware Requirements
 * **Microcontroller**: ESP32-C3
 * **Serial Communication**: MAX3232 (RS232 to TTL)
@@ -63,5 +195,6 @@
 * **Original Firmware**: Zimodem 4.0 (C)2016-2026 Bo Zimmerman ([GitHub](https://github.com/bozimmerman/Zimodem))
 * **AI Assistance**: 
   * **Claude 4.6 Sonnet (Thinking)**: 사운드 엔진(DDS) 기초 아키텍처 설계 및 주요 로직 최적화 
-  * **Gemini 3.1 Pro (High)**: 코드 리뷰, 한글 인코딩(EUC-KR) 변환 및 문서화 지원
+  * **Gemini 3.1 Pro (High)**: 코드 리뷰, Windows 9X 인증 버그 수정, 핀 배열 및 통신 최적화, 한글 인코딩 및 문서화 지원
 * **License**: [Apache License 2.0](LICENSE)
+
