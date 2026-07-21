@@ -14,7 +14,7 @@
    limitations under the License.
 */
 // #define TCP_SND_BUF                     4 * TCP_MSS
-#define ZIMODEM_VERSION "1.09"
+#define ZIMODEM_VERSION "1.14"
 const char compile_date[] = __DATE__ " " __TIME__;
 #define DEFAULT_NO_DELAY true
 #define null 0
@@ -32,7 +32,7 @@ const char compile_date[] = __DATE__ " " __TIME__;
 // firmware
 #define INCLUDE_SLIP true
 #define INCLUDE_PPP true
-// #define SUPPORT_LED_PINS true // enable if you have the spare gpio pins and
+#define SUPPORT_LED_PINS true // enable if you have the spare gpio pins and
 // leds #define INCLUDE_CMDRX16 true // enable this if you are David or Kevin
 // #define USE_DEVUPDATER true // only enable this if your name is Bo
 
@@ -62,21 +62,21 @@ const char compile_date[] = __DATE__ " " __TIME__;
 
 #if SUPPORT_LED_PINS
 #ifdef GPIO_NUM_0
-#define DEFAULT_PIN_AA GPIO_NUM_35
-#define DEFAULT_PIN_HS GPIO_NUM_34
-#define DEFAULT_PIN_WIFI GPIO_NUM_26
+#define DEFAULT_PIN_AA GPIO_NUM_0
+#define DEFAULT_PIN_RXTX GPIO_NUM_9
+#define DEFAULT_PIN_WIFI GPIO_NUM_10
 #else
-#define DEFAULT_PIN_AA 35
-#define DEFAULT_PIN_HS 34
-#define DEFAULT_PIN_WIFI 26
+#define DEFAULT_PIN_AA 0
+#define DEFAULT_PIN_RXTX 9
+#define DEFAULT_PIN_WIFI 10
 #endif
 #define DEFAULT_HS_BAUD 38400
-#define DEFAULT_AA_ACTIVE LOW
-#define DEFAULT_AA_INACTIVE HIGH
-#define DEFAULT_HS_ACTIVE LOW
-#define DEFAULT_HS_INACTIVE HIGH
-#define DEFAULT_WIFI_ACTIVE LOW
-#define DEFAULT_WIFI_INACTIVE HIGH
+#define DEFAULT_AA_ACTIVE HIGH
+#define DEFAULT_AA_INACTIVE LOW
+#define DEFAULT_RXTX_ACTIVE HIGH
+#define DEFAULT_RXTX_INACTIVE LOW
+#define DEFAULT_WIFI_ACTIVE HIGH
+#define DEFAULT_WIFI_INACTIVE LOW
 #endif
 
 #define DEFAULT_BAUD_RATE 115200
@@ -126,7 +126,7 @@ const char compile_date[] = __DATE__ " " __TIME__;
 #define DEFAULT_PIN_CTS GPIO_NUM_18 // espdev rts pin
 #define DEFAULT_PIN_RTS GPIO_NUM_17 // espdev cts pin
 #define DEFAULT_PIN_RI GPIO_NUM_6
-#define DEFAULT_PIN_DSR GPIO_NUM_9
+#define DEFAULT_PIN_DSR GPIO_NUM_1
 #define DEFAULT_PIN_SND -1
 #define DEFAULT_PIN_OTH -1 // pulse pin
 #define DEFAULT_PIN_DTR GPIO_NUM_4
@@ -299,6 +299,9 @@ static unsigned long nextReconnectDelay =
     0; // zero means don't attempt reconnects
 static SerialConfig serialConfig = DEFAULT_SERIAL_CONFIG;
 static int baudRate = DEFAULT_BAUD_RATE;
+int qosBps = 0; // 0 = unlimited, otherwise speed in bps (e.g. 56000)
+float qosTokens = 3000.0; // Token bucket limit for authentic modem speeds
+unsigned long qosLastTime = 0;
 static int dequeSize = 1 + (DEFAULT_BAUD_RATE / INTERNAL_FLOW_CONTROL_DIV);
 static BaudState baudState = BS_NORMAL;
 static unsigned long resetPushTimer = 0;
@@ -415,11 +418,7 @@ static bool connectWifi(const char *ssid, const char *password, IPAddress *ip,
         DEFAULT_RECONNECT_DELAY; // if connected, we always want to try reconns
                                  // in the future
 
-#if SUPPORT_LED_PINS
-  s_pinWrite(DEFAULT_PIN_WIFI, (WiFi.status() == WL_CONNECTED)
-                                   ? DEFAULT_WIFI_ACTIVE
-                                   : DEFAULT_WIFI_INACTIVE);
-#endif
+
   if (WiFi.status() == WL_CONNECTED)
     debugPrintf("Connected to %s with IP %s.\r\n", ssid,
                 WiFi.localIP().toString().c_str());
@@ -452,11 +451,7 @@ static void changeBaudRate(int baudRate) {
 #else
   HWSerial.begin(baudRate, serialConfig); // Change baud rate
 #endif
-#if SUPPORT_LED_PINS
-  s_pinWrite(DEFAULT_PIN_HS, (baudRate >= DEFAULT_HS_BAUD)
-                                 ? DEFAULT_HS_ACTIVE
-                                 : DEFAULT_HS_INACTIVE);
-#endif
+
 }
 
 static void changeSerialConfig(SerialConfig conf) {
@@ -552,6 +547,11 @@ void setup() {
     pinSupport[i] = true;
   pinSupport[47] = true;
   pinSupport[48] = true;
+#elif defined(ARDUINO_ESP32C3_DEV)
+  for (int i = 0; i <= 21; i++) {
+    if (i >= 11 && i <= 17) continue; // Skip flash pins usually
+    pinSupport[i] = true;
+  }
 #else
   pinSupport[2] = true;
   pinSupport[4] = true;
@@ -608,12 +608,8 @@ void setup() {
   s_pinWrite(pinDCD, dcdStatus);
   flushSerial();
 #if SUPPORT_LED_PINS
-  s_pinWrite(DEFAULT_PIN_WIFI, (WiFi.status() == WL_CONNECTED)
-                                   ? DEFAULT_WIFI_ACTIVE
-                                   : DEFAULT_WIFI_INACTIVE);
-  s_pinWrite(DEFAULT_PIN_HS, (baudRate >= DEFAULT_HS_BAUD)
-                                 ? DEFAULT_HS_ACTIVE
-                                 : DEFAULT_HS_INACTIVE);
+  s_pinWrite(DEFAULT_PIN_WIFI, DEFAULT_WIFI_INACTIVE);
+  s_pinWrite(DEFAULT_PIN_RXTX, DEFAULT_RXTX_INACTIVE);
 #endif
 }
 
@@ -680,10 +676,56 @@ void checkFactoryReset() {
 #endif
 }
 
+unsigned long lastRxtxTime = 0;
+
 void loop() {
   checkFactoryReset();
   checkReconnect();
+#if SUPPORT_LED_PINS
+  if (WiFi.status() == WL_CONNECTED) {
+    s_pinWrite(DEFAULT_PIN_WIFI, DEFAULT_WIFI_ACTIVE);
+  } else if (wifiSSI.length() > 0) {
+    s_pinWrite(DEFAULT_PIN_WIFI, ((millis() % 1000) < 500) ? DEFAULT_WIFI_ACTIVE : DEFAULT_WIFI_INACTIVE);
+  } else {
+    s_pinWrite(DEFAULT_PIN_WIFI, DEFAULT_WIFI_INACTIVE);
+  }
+  if ((millis() - lastRxtxTime < 500) || (snd_state != SND_IDLE && snd_state != SND_DONE)) {
+    s_pinWrite(DEFAULT_PIN_RXTX, DEFAULT_RXTX_ACTIVE);
+  } else {
+    s_pinWrite(DEFAULT_PIN_RXTX, DEFAULT_RXTX_INACTIVE);
+  }
+#endif
+
+  // USB 시리얼(DBSerial)을 통한 비상 명령어 처리
+  if (DBSerial.available()) {
+    String line = DBSerial.readStringUntil('\n');
+    line.trim();
+    if (line.equalsIgnoreCase("HELP")) {
+      DBSerial.println("=== USB 비상 콘솔 명령어 ===");
+      DBSerial.println(" BAUD=<rate>  : 메인 시리얼 속도 변경 및 저장 (예: BAUD=115200)");
+      DBSerial.println(" RESET        : 재부팅");
+      DBSerial.println(" FACTORY      : 공장 초기화 (모든 설정 초기화)");
+      DBSerial.println("============================");
+    } else if (line.startsWith("BAUD=")) {
+      int newBaud = line.substring(5).toInt();
+      if (newBaud > 0) {
+        baudRate = newBaud;
+        changeBaudRate(baudRate);
+        commandMode.reSaveConfig(10);
+        DBSerial.printf("Baud rate changed to %d and saved.\n", baudRate);
+      }
+    } else if (line.equalsIgnoreCase("RESET")) {
+      DBSerial.println("Rebooting...");
+      ESP.restart();
+    } else if (line.equalsIgnoreCase("FACTORY")) {
+      DBSerial.println("Factory Reset...");
+      SPIFFS.remove(CONFIG_FILE);
+      ESP.restart();
+    }
+  }
+
   if (HWSerial.available()) {
+    lastRxtxTime = millis();
     currMode->serialIncoming();
   }
   currMode->loop();

@@ -33,7 +33,8 @@
 #   define DEBUG_UART_NUM UART_NUM_0
 # endif
   static HardwareSerial HWSerial(MAIN_UART_NUM);
-  static HardwareSerial DBSerial(DEBUG_UART_NUM);
+  // Send debug logs to Native USB (Serial CDC) instead of physical UART0 pins
+  #define DBSerial Serial
 #else
 # include "ESP8266WiFi.h"
 # define HWSerial Serial

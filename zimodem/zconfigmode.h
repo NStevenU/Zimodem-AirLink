@@ -31,7 +31,9 @@ private:
     ZCFGMENU_NOTES = 11,
     ZCFGMENU_NETMENU = 12,
     ZCFGMENU_SUBNET = 13,
-    ZCFGMENU_NEWPRINT = 14
+    ZCFGMENU_NEWPRINT = 14,
+    ZCFGMENU_BAUD = 15,
+    ZCFGMENU_QOS = 16
   } currState;
 
   ZSerial serial; // storage for serial settings only

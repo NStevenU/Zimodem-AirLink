@@ -1,6 +1,10 @@
 #if INCLUDE_SLIP
 #include "lwip/tcpip.h"
 #include "lwip/sys.h"
+
+extern int qosBps;
+extern float qosTokens;
+extern unsigned long qosLastTime;
 /*
    Copyright 2022-2026 Bo Zimmerman
 
@@ -80,6 +84,20 @@ void ZSLIPMode::sendPacketToSerial(struct pbuf *p)
 {
   if(p == NULL) return;
 
+  if (qosBps > 0) {
+    unsigned long now = millis();
+    unsigned long elapsed = now - qosLastTime;
+    if (elapsed > 0) {
+      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
+      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
+      qosLastTime = now;
+    }
+    if (qosTokens < p->tot_len) {
+      return; // DROP PACKET (Tail Drop)
+    }
+    qosTokens -= p->tot_len;
+  }
+
   sserial.printb(SLIP_END);
   if(sserial.isSerialOut())
     serialOutDeque();
@@ -96,25 +114,7 @@ void ZSLIPMode::sendPacketToSerial(struct pbuf *p)
       uint8_t ihl = (payload[0] & 0x0F) * 4;
       uint8_t protocol = payload[9];
 
-      if(protocol == 1 && len >= ihl + 2)
-      {
-        uint8_t icmp_type = payload[ihl];
-        uint8_t icmp_code = payload[ihl + 1];
-        debugPrintf("SLIP-RX IP packet: ver=%d proto=%d src=%d.%d.%d.%d dst=%d.%d.%d.%d ICMP: type=%d code=%d\n",
-                    (payload[0] >> 4) & 0x0F,
-                    protocol,
-                    payload[12], payload[13], payload[14], payload[15],
-                    payload[16], payload[17], payload[18], payload[19],
-                    icmp_type, icmp_code);
-      }
-      else
-      {
-        debugPrintf("SLIP-RX IP packet: ver=%d proto=%d src=%d.%d.%d.%d dst=%d.%d.%d.%d\n",
-                    (payload[0] >> 4) & 0x0F,
-                    protocol,
-                    payload[12], payload[13], payload[14], payload[15],
-                    payload[16], payload[17], payload[18], payload[19]);
-      }
+      // Removed debugPrintf for SLIP-RX IP packet
     }
     for(int i = 0; i < len; i++)
     {
@@ -148,9 +148,7 @@ void ZSLIPMode::sendPacketToSerial(struct pbuf *p)
   sserial.printb(SLIP_END);
   if(sserial.isSerialOut())
     serialOutDeque();
-  if(logFileOpen)
-    logPrintf("SLIP-RX %d bytes\n", total);
-  debugPrintf("SLIP-RX: %d bytes\n", total);
+  // Removed logPrintf and debugPrintf for SLIP-RX bytes
 }
 
 void ZSLIPMode::injectPacketToNetwork(uint8_t *data, int len)
@@ -158,12 +156,21 @@ void ZSLIPMode::injectPacketToNetwork(uint8_t *data, int len)
   if(len < 20)
     return;
 
-  debugPrintf("SLIP-TX IP packet: ver=%d proto=%d src=%d.%d.%d.%d dst=%d.%d.%d.%d len=%d\n",
-              (data[0] >> 4) & 0x0F,
-              data[9],
-              data[12], data[13], data[14], data[15],
-              data[16], data[17], data[18], data[19],
-              len);
+  if (qosBps > 0) {
+    unsigned long now = millis();
+    unsigned long elapsed = now - qosLastTime;
+    if (elapsed > 0) {
+      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
+      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
+      qosLastTime = now;
+    }
+    if (qosTokens < len) {
+      return; // DROP PACKET (Tail Drop)
+    }
+    qosTokens -= len;
+  }
+
+  // Removed debugPrintf for SLIP-TX IP packet
 
   if(wifi_netif == NULL || original_wifi_output == NULL)
     return;
@@ -175,7 +182,9 @@ void ZSLIPMode::injectPacketToNetwork(uint8_t *data, int len)
 
   ip4_addr_t dest;
   IP4_ADDR(&dest, data[16], data[17], data[18], data[19]);
+  LOCK_TCPIP_CORE();
   err_t err = original_wifi_output(wifi_netif, p, &dest);
+  UNLOCK_TCPIP_CORE();
 
   if(err != ERR_OK)
     pbuf_free(p);
@@ -296,9 +305,7 @@ void ZSLIPMode::serialIncoming()
     {
       if(this->curBufLen > 0)
       {
-        if(logFileOpen)
-          logPrintf("SLIP-TX: %d bytes\n", this->curBufLen);
-        debugPrintf("SLIP-TX: %d bytes\n", this->curBufLen);
+        // Removed logPrintf and debugPrintf for SLIP-TX bytes
 
         injectPacketToNetwork(this->buf, this->curBufLen);
 
@@ -368,7 +375,11 @@ void ZSLIPMode::serialIncoming()
 
 void ZSLIPMode::loop()
 {
-  if(sserial.isSerialOut())
+  if(checkPlusPlusPlusEscape())
+  {
+    switchBackToCommandMode();
+  }
+  else if(sserial.isSerialOut())
     serialOutDeque();
   logFileLoop();
 }

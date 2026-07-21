@@ -69,7 +69,7 @@ void ZConfig::doModeCommand() {
   }
   switch (currState) {
   case ZCFGMENU_MAIN: {
-    if ((c == 'q') || (cmd.length() == 0)) {
+    if (cmd.length() == 0) {
       if (settingsChanged) {
         currState = ZCFGMENU_WICONFIRM;
         showMenu = true;
@@ -123,6 +123,14 @@ void ZConfig::doModeCommand() {
       commandMode.speakerMode = (commandMode.speakerMode + 1) % 3;
       snd_speaker_mode = commandMode.speakerMode;
       settingsChanged = true;
+      showMenu = true;
+    } else if (c == 'r') // baud rate
+    {
+      currState = ZCFGMENU_BAUD;
+      showMenu = true;
+    } else if (c == 'q') // qos rate
+    {
+      currState = ZCFGMENU_QOS;
       showMenu = true;
     } else if (c > 47 && c < 58) // its a phonebook entry!
     {
@@ -562,6 +570,45 @@ void ZConfig::doModeCommand() {
       serial.setXON(true);
     }
     break;
+  case ZCFGMENU_BAUD:
+    if (cmd.length() == 0) {
+      currState = ZCFGMENU_MAIN;
+      showMenu = true;
+    } else {
+      int newBaud = atoi(cmd.c_str());
+      if (newBaud > 0) {
+        baudRate = newBaud;
+        changeBaudRate(baudRate);
+        settingsChanged = true;
+      } else {
+        serial.printf("%s%sInvalid baud rate.%s%s", EOLNC, EOLNC, EOLNC, EOLNC);
+      }
+      currState = ZCFGMENU_MAIN;
+      showMenu = true;
+    }
+    break;
+  case ZCFGMENU_QOS:
+    if (cmd.length() == 0) {
+      currState = ZCFGMENU_MAIN;
+      showMenu = true;
+    } else {
+      int newQos = atoi(cmd.c_str());
+      if (cmd == "0" || newQos == 56 || newQos == 33 || newQos == 28 || newQos == 14 || newQos == 9 || newQos == 2 || newQos == 56000 || newQos == 33600 || newQos == 28800 || newQos == 14400 || newQos == 9600 || newQos == 2400) {
+        if (cmd == "0") qosBps = 0;
+        else if (newQos == 56 || newQos == 56000) qosBps = 56000;
+        else if (newQos == 33 || newQos == 33600) qosBps = 33600;
+        else if (newQos == 28 || newQos == 28800) qosBps = 28800;
+        else if (newQos == 14 || newQos == 14400) qosBps = 14400;
+        else if (newQos == 9 || newQos == 9600) qosBps = 9600;
+        else if (newQos == 2 || newQos == 2400) qosBps = 2400;
+        settingsChanged = true;
+      } else {
+        serial.printf("%s%sInvalid QoS bandwidth.%s%s", EOLNC, EOLNC, EOLNC, EOLNC);
+      }
+      currState = ZCFGMENU_MAIN;
+      showMenu = true;
+    }
+    break;
   }
 }
 
@@ -720,6 +767,10 @@ void ZConfig::loop() {
                commandMode.serial.isPetsciiMode() ? "ON" : "OFF");
       menuLine("[LANG]", k ? "\xBE\xF0\xBE\xEE(Language): " : "language: ",
                k ? "\xC7\xD1\xB1\xB9\xBE\xEE(KOREAN)" : "ENGLISH");
+      menuLine("[RATE]", k ? "\xC6\xF7\xC6\xAE \xBC\xD3\xB5\xB5: " : "baud rate: ",
+               String(baudRate).c_str());
+      menuLine("[QOS]", k ? "QoS \xBC\xD3\xB5\xB5 \xC1\xA6\xC7\xD1: " : "QoS bandwidth: ",
+               qosBps == 0 ? (k ? "\xB9\xAB\xC1\xA6\xC7\xD1(0)" : "Unlimited(0)") : String(qosBps).c_str());
       menuLine("[SPEAKER]", k ? "\xBD\xBA\xC7\xC7\xC4\xBF(ATM): " : "speaker(ATM): ",
                commandMode.speakerMode == 0 ? (k ? "\xB2\xFB (0)" : "OFF (0)")
                : commandMode.speakerMode == 1 ? (k ? "\xB4\xD9\xC0\xCC\xBE\xF3\xBD\xC3 (1)" : "DIAL (1)")
@@ -1029,6 +1080,14 @@ void ZConfig::loop() {
     }
     case ZCFGMENU_WICONFIRM: {
       serial.printf(commandMode.isKorean ? "%s\xBC\xB3\xC1\xA4\xC0\xCC \xBA\xAF\xB0\xE6\xB5\xC7\xBE\xFA\xBD\xC0\xB4\xCF\xB4\xD9. \xC0\xFA\xC0\xE5\xC7\xCF\xBD\xC3\xB0\xDA\xBD\xC0\xB4\xCF\xB1\xEE (y/N)?" : "%sYour settings changed. Save (y/N)?", EOLNC);
+      break;
+    }
+    case ZCFGMENU_BAUD: {
+      serial.printf(commandMode.isKorean ? "%s\xC6\xF7\xC6\xAE \xBC\xD3\xB5\xB5 \xC0\xD4\xB7\xC2(\xBF\xB9: 57600): " : "%sEnter new baud rate (e.g. 57600): ", EOLNC);
+      break;
+    }
+    case ZCFGMENU_QOS: {
+      serial.printf(commandMode.isKorean ? "%sQoS \xBC\xD3\xB5\xB5 \xC0\xD4\xB7\xC2(\xBF\xB9: 56, 33.6, 14.4, 0:\xB9\xAB\xC1\xA6\xC7\xD1): " : "%sEnter new QoS bandwidth (e.g. 56, 33.6, 14.4, 0:Unlimited): ", EOLNC);
       break;
     }
     }

@@ -2,6 +2,10 @@
 #include "lwip/tcpip.h"
 #include "lwip/sys.h"
 
+extern int qosBps;
+extern float qosTokens;
+extern unsigned long qosLastTime;
+
 static const uint16_t fcstab[256] = {
   0x0000, 0x1189, 0x2312, 0x329b, 0x4624, 0x57ad, 0x6536, 0x74bf,
   0x8c48, 0x9dc1, 0xaf5a, 0xbed3, 0xca6c, 0xdbe5, 0xe97e, 0xf8f7,
@@ -164,8 +168,6 @@ void ZPPPMode::sendPPPFrame(uint16_t protocol, uint8_t *data, int len)
   sserial.printb(PPP_FLAG);
   if(sserial.isSerialOut())
     serialOutDeque();
-
-  debugPrintf("PPP-TX: proto=0x%04X len=%d\n", protocol, len);
 }
 
 
@@ -195,6 +197,21 @@ void ZPPPMode::sendIPCPPacket(uint8_t code, uint8_t id, uint8_t *data, int len)
   sendPPPFrame(PPP_PROTOCOL_IPCP, packet, len + 4);
 }
 
+void ZPPPMode::sendPAPPacket(uint8_t code, uint8_t id, const char *msg)
+{
+  uint8_t packet[256];
+  int msgLen = msg ? strlen(msg) : 0;
+  packet[0] = code;
+  packet[1] = id;
+  packet[2] = ((msgLen + 5) >> 8) & 0xFF;
+  packet[3] = (msgLen + 5) & 0xFF;
+  packet[4] = msgLen; // Message Length
+  if(msgLen > 0)
+    memcpy(packet + 5, msg, msgLen);
+
+  sendPPPFrame(PPP_PROTOCOL_PAP, packet, msgLen + 5);
+}
+
 void ZPPPMode::handleLCP(uint8_t *data, int len)
 {
   if(len < 4)
@@ -203,19 +220,51 @@ void ZPPPMode::handleLCP(uint8_t *data, int len)
   uint8_t code = data[0];
   uint8_t id = data[1];
 
-  debugPrintf("PPP-RX LCP: code=%d id=%d\n", code, id);
-
   switch(code)
   {
     case LCP_CONF_REQ:
-      sendLCPPacket(LCP_CONF_ACK, id, data + 4, len - 4);
-      if(!lcpOpened)
+    {
+      uint8_t response[256];
+      int respLen = 0;
+      int i = 4;
+      bool reject = false;
+      
+      while(i < len)
       {
-        lcpOpened = true;
-        lcpId++;
-        sendLCPPacket(LCP_CONF_REQ, lcpId, NULL, 0);
+        uint8_t optType = data[i];
+        uint8_t optLen = data[i + 1];
+        if(optLen < 2) break; // Invalid option length
+
+        // STRICT WHITELIST: Only accept MRU (1), ACCM (2), and Magic Number (5)
+        // Anything else (like Callback 13, PFC 7, ACFC 8) MUST be rejected.
+        if(optType != 1 && optType != 2 && optType != 5)
+        {
+          memcpy(response + respLen, data + i, optLen);
+          respLen += optLen;
+          reject = true;
+        }
+        i += optLen;
+      }
+
+      if(reject)
+      {
+        sendLCPPacket(LCP_CONF_REJ, id, response, respLen);
+      }
+      else
+      {
+        sendLCPPacket(LCP_CONF_ACK, id, data + 4, len - 4);
+        if(!lcpOpened)
+        {
+          lcpOpened = true;
+          lcpId++;
+          
+          // Require PAP Authentication (Type 3, Length 4, 0xC023)
+          uint8_t lcpReqData[] = { 3, 4, 0xC0, 0x23 };
+          sendLCPPacket(LCP_CONF_REQ, lcpId, lcpReqData, sizeof(lcpReqData));
+        }
       }
       break;
+    }
     case LCP_CONF_ACK:
       if(lcpOpened)
         state = PPP_OPENED;
@@ -238,61 +287,188 @@ void ZPPPMode::handleIPCP(uint8_t *data, int len)
   uint8_t code = data[0];
   uint8_t id = data[1];
 
-  debugPrintf("PPP-RX IPCP: code=%d id=%d\n", code, id);
-
   switch(code)
   {
     case LCP_CONF_REQ:
     {
-      uint8_t response[256];
-      int respLen = 0;
+      // If Win95 initiates IPCP, we know it's ready. Send our Req if not sent yet.
+      if(!ipcpReqSent)
+      {
+        ipcpReqSent = true;
+        ipcpId++;
+        IPAddress gwIP = WiFi.gatewayIP();
+        uint8_t ipReq[6] = { 3, 6, gwIP[0], gwIP[1], gwIP[2], gwIP[3] };
+        sendIPCPPacket(LCP_CONF_REQ, ipcpId, ipReq, sizeof(ipReq));
+      }
+
+      uint8_t ackResp[256];
+      uint8_t nakResp[256];
+      uint8_t rejResp[256];
+      int ackLen = 0, nakLen = 0, rejLen = 0;
       int i = 4;
-      bool nak = false;
 
       while(i < len)
       {
         uint8_t optType = data[i];
         uint8_t optLen = data[i + 1];
+        if(optLen < 2) break;
 
-        if(optType == 3)
+        if(optType == 3) // IP Address
         {
           IPAddress wifiIP = WiFi.localIP();
-          response[respLen++] = 3;
-          response[respLen++] = 6;
-          response[respLen++] = wifiIP[0];
-          response[respLen++] = wifiIP[1];
-          response[respLen++] = wifiIP[2];
-          response[respLen++] = wifiIP[3];
+          if(optLen == 6 && data[i+2] == wifiIP[0] && data[i+3] == wifiIP[1] && data[i+4] == wifiIP[2] && data[i+5] == wifiIP[3])
+          {
+            memcpy(ackResp + ackLen, data + i, optLen);
+            ackLen += optLen;
+          }
+          else
+          {
+            nakResp[nakLen++] = 3;
+            nakResp[nakLen++] = 6;
+            nakResp[nakLen++] = wifiIP[0];
+            nakResp[nakLen++] = wifiIP[1];
+            nakResp[nakLen++] = wifiIP[2];
+            nakResp[nakLen++] = wifiIP[3];
+          }
         }
-        else
+        else if(optType == 129) // Primary DNS
         {
-          memcpy(response + respLen, data + i, optLen);
-          respLen += optLen;
+          IPAddress dnsIP = WiFi.dnsIP(0);
+          if(optLen == 6 && data[i+2] == dnsIP[0] && data[i+3] == dnsIP[1] && data[i+4] == dnsIP[2] && data[i+5] == dnsIP[3])
+          {
+            memcpy(ackResp + ackLen, data + i, optLen);
+            ackLen += optLen;
+          }
+          else
+          {
+            nakResp[nakLen++] = 129;
+            nakResp[nakLen++] = 6;
+            nakResp[nakLen++] = dnsIP[0];
+            nakResp[nakLen++] = dnsIP[1];
+            nakResp[nakLen++] = dnsIP[2];
+            nakResp[nakLen++] = dnsIP[3];
+          }
+        }
+        else if(optType == 131) // Secondary DNS
+        {
+          IPAddress dnsIP = WiFi.dnsIP(1);
+          if(optLen == 6 && data[i+2] == dnsIP[0] && data[i+3] == dnsIP[1] && data[i+4] == dnsIP[2] && data[i+5] == dnsIP[3])
+          {
+            memcpy(ackResp + ackLen, data + i, optLen);
+            ackLen += optLen;
+          }
+          else
+          {
+            nakResp[nakLen++] = 131;
+            nakResp[nakLen++] = 6;
+            nakResp[nakLen++] = dnsIP[0];
+            nakResp[nakLen++] = dnsIP[1];
+            nakResp[nakLen++] = dnsIP[2];
+            nakResp[nakLen++] = dnsIP[3];
+          }
+        }
+        else // Unsupported option (WINS, etc)
+        {
+          memcpy(rejResp + rejLen, data + i, optLen);
+          rejLen += optLen;
         }
         i += optLen;
       }
 
-      sendIPCPPacket(LCP_CONF_ACK, id, response, respLen);
-
-      if(!ipcpOpened)
+      if(rejLen > 0)
       {
-        ipcpOpened = true;
-        ipcpId++;
-        uint8_t ipReq[6];
-        IPAddress wifiIP = WiFi.localIP();
-        ipReq[0] = 3;
-        ipReq[1] = 6;
-        ipReq[2] = wifiIP[0];
-        ipReq[3] = wifiIP[1];
-        ipReq[4] = wifiIP[2];
-        ipReq[5] = wifiIP[3];
-        sendIPCPPacket(LCP_CONF_REQ, ipcpId, ipReq, 6);
+        sendIPCPPacket(LCP_CONF_REJ, id, rejResp, rejLen);
+      }
+      else if(nakLen > 0)
+      {
+        sendIPCPPacket(LCP_CONF_NAK, id, nakResp, nakLen);
+      }
+      else
+      {
+        sendIPCPPacket(LCP_CONF_ACK, id, ackResp, ackLen);
+
+        // Fallback: if we somehow haven't sent our Conf-Req yet, send it now.
+        // (Normally handlePAP sends it first; this covers edge cases.)
+        if(papPassed && !ipcpReqSent)
+        {
+          ipcpReqSent = true;
+          ipcpId++;
+          IPAddress gwIP = WiFi.gatewayIP();
+          uint8_t fbReq[6] = { 3, 6, gwIP[0], gwIP[1], gwIP[2], gwIP[3] };
+          sendIPCPPacket(LCP_CONF_REQ, ipcpId, fbReq, sizeof(fbReq));
+        }
       }
       break;
     }
     case LCP_CONF_ACK:
-      debugPrintf("PPP: IPCP opened, IP forwarding active\n");
+      ipcpOpened = true;  // Mark IPCP complete when Win95 ACKs our Conf-Req
       break;
+    case LCP_CONF_NAK:
+    {
+      // Resend Conf-Req
+      ipcpReqSent = false;
+      ipcpId++;
+      IPAddress gwIP = WiFi.gatewayIP();
+      uint8_t nakRetry[6] = { 3, 6, gwIP[0], gwIP[1], gwIP[2], gwIP[3] };
+      sendIPCPPacket(LCP_CONF_REQ, ipcpId, nakRetry, sizeof(nakRetry));
+      break;
+    }
+    case LCP_CONF_REJ:
+    {
+      // We should technically remove rejected options, but we just resend for now
+      ipcpReqSent = false;
+      ipcpId++;
+      sendIPCPPacket(LCP_CONF_REQ, ipcpId, NULL, 0);
+      break;
+    }
+  }
+}
+
+void ZPPPMode::handlePAP(uint8_t *data, int len)
+{
+  if(len < 4)
+    return;
+
+  uint8_t code = data[0];
+  uint8_t id = data[1];
+
+  // Removed debugPrintf for PPP-RX PAP
+
+  if(code == PAP_AUTH_REQ)
+  {
+    int i = 4;
+    
+    // Extract Peer-ID
+    if (i >= len) return;
+    uint8_t peerIdLen = data[i++];
+    char peerId[256];
+    memset(peerId, 0, sizeof(peerId));
+    if (i + peerIdLen > len) return;
+    if (peerIdLen > 0)
+      memcpy(peerId, data + i, peerIdLen);
+    i += peerIdLen;
+
+    // Extract Password
+    if (i >= len) return;
+    uint8_t passwdLen = data[i++];
+    char passwd[256];
+    memset(passwd, 0, sizeof(passwd));
+    if (i + passwdLen > len) return;
+    if (passwdLen > 0)
+      memcpy(passwd, data + i, passwdLen);
+
+    debugPrintf("PPP PAP: User='%s' Pass='%s'\n", peerId, passwd);
+
+    if(strcmp(peerId, "airlink") == 0 && strcmp(passwd, "1111") == 0)
+    {
+      papPassed = true;
+      sendPAPPacket(PAP_AUTH_ACK, id, "Login OK");
+    }
+    else
+    {
+      papPassed = false;
+      sendPAPPacket(PAP_AUTH_NAK, id, "Login incorrect");
+    }
   }
 }
 
@@ -330,11 +506,28 @@ void ZPPPMode::processPPPFrame(uint8_t *data, int len)
     case PPP_PROTOCOL_LCP:
       handleLCP(payload, payloadLen);
       break;
+    case PPP_PROTOCOL_PAP:
+      handlePAP(payload, payloadLen);
+      break;
     case PPP_PROTOCOL_IPCP:
       handleIPCP(payload, payloadLen);
       break;
     case PPP_PROTOCOL_IP:
       handleIPPacket(payload, payloadLen);
+      break;
+    default:
+      debugPrintf("PPP-RX: Unknown protocol 0x%04X\n", protocol);
+      if(state >= PPP_ESTABLISH)
+      {
+        uint8_t rejPacket[128];
+        rejPacket[0] = (protocol >> 8) & 0xFF;
+        rejPacket[1] = protocol & 0xFF;
+        int copyLen = len;
+        if(copyLen > 100) copyLen = 100; // Limit payload size
+        memcpy(rejPacket + 2, data, copyLen);
+        lcpId++;
+        sendLCPPacket(8, lcpId, rejPacket, 2 + copyLen); // 8 = LCP_PROT_REJ
+      }
       break;
   }
 }
@@ -343,6 +536,20 @@ void ZPPPMode::sendPacketToSerial(struct pbuf *p)
 {
   if(p == NULL || state != PPP_OPENED || !ipcpOpened)
     return;
+
+  if (qosBps > 0) {
+    unsigned long now = millis();
+    unsigned long elapsed = now - qosLastTime;
+    if (elapsed > 0) {
+      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
+      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
+      qosLastTime = now;
+    }
+    if (qosTokens < p->tot_len) {
+      return; // DROP PACKET (Tail Drop)
+    }
+    qosTokens -= p->tot_len;
+  }
 
   struct pbuf *q = p;
   int total = 0;
@@ -359,11 +566,7 @@ void ZPPPMode::sendPacketToSerial(struct pbuf *p)
 
   if(total >= 20)
   {
-    debugPrintf("PPP-RX IP packet: ver=%d proto=%d src=%d.%d.%d.%d dst=%d.%d.%d.%d\n",
-                (tempBuf[0] >> 4) & 0x0F,
-                tempBuf[9],
-                tempBuf[12], tempBuf[13], tempBuf[14], tempBuf[15],
-                tempBuf[16], tempBuf[17], tempBuf[18], tempBuf[19]);
+    // Removed debugPrintf for PPP-RX IP packet
   }
 
   sendPPPFrame(PPP_PROTOCOL_IP, tempBuf, total);
@@ -374,12 +577,21 @@ void ZPPPMode::injectPacketToNetwork(uint8_t *data, int len)
   if(len < 20)
     return;
 
-  debugPrintf("PPP-TX IP packet: ver=%d proto=%d src=%d.%d.%d.%d dst=%d.%d.%d.%d len=%d\n",
-              (data[0] >> 4) & 0x0F,
-              data[9],
-              data[12], data[13], data[14], data[15],
-              data[16], data[17], data[18], data[19],
-              len);
+  if (qosBps > 0) {
+    unsigned long now = millis();
+    unsigned long elapsed = now - qosLastTime;
+    if (elapsed > 0) {
+      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
+      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
+      qosLastTime = now;
+    }
+    if (qosTokens < len) {
+      return; // DROP PACKET (Tail Drop)
+    }
+    qosTokens -= len;
+  }
+
+  // Removed debugPrintf for PPP-TX IP packet
 
   if(wifi_netif == NULL || original_wifi_output == NULL)
     return;
@@ -393,7 +605,9 @@ void ZPPPMode::injectPacketToNetwork(uint8_t *data, int len)
   ip4_addr_t dest;
   IP4_ADDR(&dest, data[16], data[17], data[18], data[19]);
 
+  LOCK_TCPIP_CORE();
   err_t err = original_wifi_output(wifi_netif, p, &dest);
+  UNLOCK_TCPIP_CORE();
 
   if(err != ERR_OK)
     pbuf_free(p);
@@ -408,7 +622,9 @@ void ZPPPMode::switchBackToCommandMode()
   if(wifi_netif != NULL && original_wifi_input != NULL)
     wifi_netif->input = original_wifi_input;
 
+  LOCK_TCPIP_CORE();
   netif_remove(&ppp_netif);
+  UNLOCK_TCPIP_CORE();
   currMode = &commandMode;
 
   if(this->buf != 0)
@@ -432,6 +648,8 @@ void ZPPPMode::switchTo()
   this->state = PPP_ESTABLISH;
   this->lcpOpened = false;
   this->ipcpOpened = false;
+  this->ipcpReqSent = false;
+  this->papPassed = false;
   this->lcpId = 0;
   this->ipcpId = 0;
 
@@ -569,7 +787,11 @@ void ZPPPMode::serialIncoming()
 
 void ZPPPMode::loop()
 {
-  if(sserial.isSerialOut())
+  if(checkPlusPlusPlusEscape())
+  {
+    switchBackToCommandMode();
+  }
+  else if(sserial.isSerialOut())
     serialOutDeque();
   logFileLoop();
 }

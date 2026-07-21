@@ -230,6 +230,11 @@ static void snd_dial_sequence(const char *addr) {
   if (proto != NULL)
     p = proto + 3;
 
+  // 터미널 매크로 등으로 인해 주소 맨 앞에 ATDT/ATDP가 중복 포함되어 전달될 경우 무시
+  if (strncasecmp(p, "ATDT", 4) == 0 || strncasecmp(p, "ATDP", 4) == 0 || strncasecmp(p, "ATD", 3) == 0) {
+    p += (strncasecmp(p, "ATD", 3) == 0 && (p[3] == 't' || p[3] == 'T' || p[3] == 'p' || p[3] == 'P')) ? 4 : 3;
+  }
+
   // 발신음 (0.4초)
   snd_play_multi(350, 440, 0, 0, 400);
   snd_play_silence(100);
@@ -324,21 +329,6 @@ static void snd_handshake_sequence() {
   snd_play_noise(1500);
   snd_play_silence(50);
   snd_play_noise(3000);
-
-  // 피치 상승
-  uint32_t tp = millis();
-  int sp = 0;
-  while (millis() - tp < 2000) {
-    snd_tone_active = false;
-    snd_phase_inc[0] = snd_f2p(150 + sp * 2);
-    snd_phase_inc[1] = snd_f2p(300 + sp * 3);
-    snd_active_tones = 2;
-    snd_tone_active = true;
-    delay(4);
-    sp++;
-  }
-  snd_tone_active = false;
-  snd_play_noise(2000);
 }
 
 // ─── FreeRTOS 사운드 태스크 ────────────────────────────────

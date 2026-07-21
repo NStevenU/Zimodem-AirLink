@@ -14,6 +14,10 @@
    limitations under the License.
 */
 
+extern int qosBps;
+extern float qosTokens;
+extern unsigned long qosLastTime;
+
 void ZStream::switchTo(WiFiClientNode *conn)
 {
   debugPrintf("\r\nMode:Stream\r\n");
@@ -82,6 +86,22 @@ void ZStream::serialIncoming()
   int bytesAvailable = HWSerial.available();
   if(bytesAvailable == 0)
     return;
+
+  if (qosBps > 0) {
+    unsigned long now = millis();
+    unsigned long elapsed = now - qosLastTime;
+    if (elapsed > 0) {
+      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
+      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
+      qosLastTime = now;
+    }
+    if (qosTokens < 1.0) {
+      return;
+    } else if (bytesAvailable > (int)qosTokens) {
+      bytesAvailable = (int)qosTokens;
+    }
+  }
+
   uint8_t escBufDex = 0;
   while(--bytesAvailable >= 0)
   {
@@ -106,6 +126,7 @@ void ZStream::serialIncoming()
     }
     processPlusPlusPlus(c);
     logSerialIn(c);
+    if (qosBps > 0) qosTokens -= 1.0;
     if((c==19)&&(getFlowControl()==FCT_NORMAL))
       serial.setXON(false);
     else
@@ -327,6 +348,22 @@ void ZStream::loop()
       if(bufferRemaining > 0)
       {
         int bytesAvailable = current->available();
+        
+        if (qosBps > 0) {
+          unsigned long now = millis();
+          unsigned long elapsed = now - qosLastTime;
+          if (elapsed > 0) {
+            qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
+            if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
+            qosLastTime = now;
+          }
+          if (qosTokens < 1.0) {
+            bytesAvailable = 0;
+          } else if (bytesAvailable > (int)qosTokens) {
+            bytesAvailable = (int)qosTokens;
+          }
+        }
+
         if(bytesAvailable > bufferRemaining)
           bytesAvailable = bufferRemaining;
         if(bytesAvailable>0)
@@ -336,6 +373,7 @@ void ZStream::loop()
             if(serial.isSerialCancelled())
               break;
             uint8_t c=current->read();
+            if (qosBps > 0) qosTokens -= 1.0;
             logSocketIn(c);
             if((!isTelnet() || handleAsciiIAC((char *)&c,current))
             && (!isPETSCII() || ascToPet((char *)&c,current)))

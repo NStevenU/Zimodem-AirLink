@@ -227,8 +227,11 @@ bool ZSerial::isSerialHalted()
   return !isSerialOut();
 }
 
+extern unsigned long lastRxtxTime;
+
 void ZSerial::enqueByte(uint8_t c)
 {
+  lastRxtxTime = millis();
   if(TBUFtail == TBUFhead)
   {
     switch(flowControlType)

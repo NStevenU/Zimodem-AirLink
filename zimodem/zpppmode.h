@@ -10,6 +10,7 @@
 #define PPP_PROTOCOL_LCP    0xC021
 #define PPP_PROTOCOL_IPCP   0x8021
 #define PPP_PROTOCOL_IP     0x0021
+#define PPP_PROTOCOL_PAP    0xC023
 
 #define LCP_CONF_REQ    1
 #define LCP_CONF_ACK    2
@@ -20,6 +21,10 @@
 #define LCP_CODE_REJ    7
 #define LCP_ECHO_REQ    8
 #define LCP_ECHO_REPLY  9
+
+#define PAP_AUTH_REQ    1
+#define PAP_AUTH_ACK    2
+#define PAP_AUTH_NAK    3
 
 enum PPPState
 {
@@ -43,15 +48,19 @@ private:
   uint8_t ipcpId = 0;
   bool lcpOpened = false;
   bool ipcpOpened = false;
+  bool papPassed = false;
+  bool ipcpReqSent = false;  // True once we have sent our own IPCP Conf-Req
 
   struct netif ppp_netif;
   struct netif *wifi_netif = NULL;
 
   void sendLCPPacket(uint8_t code, uint8_t id, uint8_t *data, int len);
   void sendIPCPPacket(uint8_t code, uint8_t id, uint8_t *data, int len);
+  void sendPAPPacket(uint8_t code, uint8_t id, const char *msg);
   void sendPPPFrame(uint16_t protocol, uint8_t *data, int len);
   void handleLCP(uint8_t *data, int len);
   void handleIPCP(uint8_t *data, int len);
+  void handlePAP(uint8_t *data, int len);
   void handleIPPacket(uint8_t *data, int len);
   void processPPPFrame(uint8_t *data, int len);
   uint16_t calculateFCS(uint8_t *data, int len);

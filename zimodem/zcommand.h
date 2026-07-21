@@ -156,7 +156,6 @@ private:
   void setConfigDefaults();
   void parseConfigOptions(String configArguments[]);
   void setOptionsFromSavedConfig(String configArguments[]);
-  bool reSaveConfig(int retries);
   void setAltOpModeAdjustments();
   int pinStatusDecoder(int pinActive, int pinInactive);
   int getStatusRegister(const int snum, int crc8);
@@ -219,6 +218,7 @@ public:
 
   ZCommand();
   void loadConfig();
+  bool reSaveConfig(int retries);
 
   FlowControlType getFlowControlType();
   int getConfigFlagBitmap();

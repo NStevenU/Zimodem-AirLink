@@ -213,9 +213,9 @@ void ZCommand::setConfigDefaults() {
     pinMode(DEFAULT_PIN_WIFI, OUTPUT);
     digitalWrite(DEFAULT_PIN_WIFI, DEFAULT_WIFI_INACTIVE);
   }
-  if (pinSupport[DEFAULT_PIN_HS]) {
-    pinMode(DEFAULT_PIN_HS, OUTPUT);
-    digitalWrite(DEFAULT_PIN_HS, DEFAULT_HS_INACTIVE);
+  if (pinSupport[DEFAULT_PIN_RXTX]) {
+    pinMode(DEFAULT_PIN_RXTX, OUTPUT);
+    digitalWrite(DEFAULT_PIN_RXTX, DEFAULT_RXTX_INACTIVE);
   }
 #endif
 }
@@ -248,7 +248,8 @@ ZResult ZCommand::doResetCommand(bool resetOpMode) {
   WiFiServerNode::DestroyAllServers();
   OpModes oldMode = altOpMode;
   setConfigDefaults();
-  String argv[CFG_LAST + 3]; // +3: speakerMode(41), isKorean(42) 저장용
+  String argv[CFG_LAST +
+              4]; // +4: speakerMode(41), isKorean(42), qosBps(43) 저장용
   parseConfigOptions(argv);
   eon = 0;
   serial.setXON(true);
@@ -385,7 +386,8 @@ bool ZCommand::reSaveConfig(int retries) {
            staticGWstr.c_str(), staticSNstr.c_str());
   f.printf("%s,%d,%d,%d", busyMsghex.c_str(), telnetSupport,
            streamMode.getHangupType(), altOpMode);
-  f.printf(",%d,%d", speakerMode, isKorean ? 1 : 0); // 스피커 설정, 언어 설정
+  f.printf(",%d,%d,%d", speakerMode, isKorean ? 1 : 0,
+           qosBps); // 스피커 설정, 언어 설정, QoS 속도 제한
 
   f.close();
   delay(500);
@@ -398,7 +400,7 @@ bool ZCommand::reSaveConfig(int retries) {
       debugPrintf("Saved Config: %s\r\n", str.c_str());
       for (int i = 0; i < str.length(); i++) {
         if ((str[i] == ',') &&
-            (argn <= CFG_LAST + 2)) // +2: speakerMode, isKorean 포함
+            (argn <= CFG_LAST + 3)) // +3: speakerMode, isKorean, qosBps 포함
           argn++;
       }
     }
@@ -554,6 +556,10 @@ void ZCommand::setOptionsFromSavedConfig(String configArguments[]) {
     if (langArg.length() > 0) {
       isKorean = (atoi(langArg.c_str()) != 0);
     }
+    String qosArg = configArguments[CFG_LAST + 3]; // index 43
+    if (qosArg.length() > 0) {
+      qosBps = atoi(qosArg.c_str());
+    }
   }
   updateAutoAnswer();
 }
@@ -573,7 +579,7 @@ void ZCommand::parseConfigOptions(String configArguments[]) {
     int argn = 0;
     for (int i = 0; i < str.length(); i++) {
       if (str[i] == ',') {
-        if (argn <= CFG_LAST + 2) // +2: isKorean 슬롯(인덱스 42)까지 읽음
+        if (argn <= CFG_LAST + 3) // +3: qosBps 슬롯(인덱스 43)까지 읽음
           argn++;
         else
           break;
@@ -594,12 +600,15 @@ void ZCommand::loadConfig() {
   if (WiFi.status() == WL_CONNECTED)
     WiFi.disconnect();
   setConfigDefaults();
-  String argv[CFG_LAST + 3]; // +3: speakerMode(41), isKorean(42) 저장용
+  String argv[CFG_LAST +
+              4]; // +4: speakerMode(41), isKorean(42), qosBps(43) 저장용
   parseConfigOptions(argv);
   if (argv[CFG_BAUDRATE].length() > 0)
     baudRate = atoi(argv[CFG_BAUDRATE].c_str());
   if (baudRate <= 0)
     baudRate = DEFAULT_BAUD_RATE;
+  if (argv[CFG_LAST + 3].length() > 0)
+    qosBps = atoi(argv[CFG_LAST + 3].c_str());
   if (argv[CFG_UART].length() > 0)
     serialConfig = (SerialConfig)atoi(argv[CFG_UART].c_str());
   if (serialConfig <= 0)
@@ -1675,8 +1684,11 @@ ZResult ZCommand::doDialStreamCommand(unsigned long vval, uint8_t *vbuf,
       return ZERROR;
     else {
       streamMode.switchTo(current);
+      return ZCONNECT; // Added explicitly to prevent fall-through
     }
-  } else if ((vval >= 0) && (isNumber)) {
+  }
+
+  if ((vval >= 0) && (isNumber)) {
     PhoneBookEntry *phb = PhoneBookEntry::findPhonebookEntry(vval);
     if (phb != null) {
       int addrLen = strlen(phb->address);
@@ -1690,6 +1702,8 @@ ZResult ZCommand::doDialStreamCommand(unsigned long vval, uint8_t *vbuf,
 #if INCLUDE_SLIP
     if (vval == 1480) // slip no login
     {
+      snd_start_dial("01480");
+      snd_finish(true);
       slipMode.switchTo();
       return ZCONNECT;
     }
@@ -1697,6 +1711,8 @@ ZResult ZCommand::doDialStreamCommand(unsigned long vval, uint8_t *vbuf,
 #if INCLUDE_PPP
     if (vval == 1481) // ppp dial
     {
+      snd_start_dial("01481");
+      snd_finish(true);
       pppMode.switchTo();
       return ZCONNECT;
     }
@@ -1710,9 +1726,12 @@ ZResult ZCommand::doDialStreamCommand(unsigned long vval, uint8_t *vbuf,
       if (strchr(dmodifiers, ';') == 0)
         streamMode.switchTo(c);
       return ZCONNECT;
-    } else
-      return ZERROR;
-  } else {
+    }
+    // Fall through to treat as string if not found
+  }
+
+  // Treat as string
+  {
     ConnSettings flags(dmodifiers);
     if (!telnetSupport)
       flags.setFlag(FLAG_TELNET, false);
@@ -1721,21 +1740,17 @@ ZResult ZCommand::doDialStreamCommand(unsigned long vval, uint8_t *vbuf,
     int port = -1;
     char *username = 0;
     char *password = 0;
+    // [사운드] parseHostInfo가 vbuf를 수정하기 전에 원본 주소 저장
+    char snd_addr_buf[256];
+    strncpy(snd_addr_buf, (const char *)vbuf, sizeof(snd_addr_buf) - 1);
+    snd_addr_buf[sizeof(snd_addr_buf) - 1] = '\0';
+
     parseHostInfo(vbuf, &host, &port, &username, &password);
     if (port < 0)
       port = ((username != 0) && ((flagsBitmap & FLAG_SECURE) == FLAG_SECURE))
                  ? 22
                  : 23;
 
-    // [사운드] parseHostInfo가 vbuf를 수정하기 전에 원본 주소 저장
-    // (parseHostInfo는 콜론 위치에 \0을 삽입하므로 vbuf만 쓰면 포트번호가 잘림)
-    char snd_addr_buf[256];
-    strncpy(snd_addr_buf, (const char *)vbuf, sizeof(snd_addr_buf) - 1);
-    // 콜론 이후 포트번호까지 포함한 전체 주소 복원: host + ":" + port
-    if (port > 0) {
-      int hlen = strlen(snd_addr_buf);
-      snprintf(snd_addr_buf + hlen, sizeof(snd_addr_buf) - hlen, ":%d", port);
-    }
     snd_start_dial(snd_addr_buf);
 
     WiFiClientNode *c = new WiFiClientNode(
@@ -2667,7 +2682,54 @@ ZResult ZCommand::doSerialCommand() {
       case '+':
         for (int i = 0; vbuf[i] != 0; i++)
           vbuf[i] = lc(vbuf[i]);
-        if (strcmp((const char *)vbuf, "config") == 0) {
+        if (strstr((const char *)vbuf, "qos=") == (char *)vbuf) {
+          char *val = (char *)vbuf + 4;
+          if (strcmp(val, "0") == 0) {
+            qosBps = 0;
+            result = ZOK;
+          } else if (strcmp(val, "56") == 0) {
+            qosBps = 56000;
+            result = ZOK;
+          } else if (strcmp(val, "33.6") == 0) {
+            qosBps = 33600;
+            result = ZOK;
+          } else if (strcmp(val, "28.8") == 0) {
+            qosBps = 28800;
+            result = ZOK;
+          } else if (strcmp(val, "14.4") == 0) {
+            qosBps = 14400;
+            result = ZOK;
+          } else if (strcmp(val, "9.6") == 0) {
+            qosBps = 9600;
+            result = ZOK;
+          } else if (strcmp(val, "2.4") == 0) {
+            qosBps = 2400;
+            result = ZOK;
+          } else {
+            result = ZERROR;
+          }
+          if (result == ZOK) {
+            reSaveConfig(10);
+          }
+        } else if (strcmp((const char *)vbuf, "qos?") == 0) {
+          serial.prints(EOLN);
+          if (qosBps == 0)
+            serial.prints("0");
+          else if (qosBps == 56000)
+            serial.prints("56");
+          else if (qosBps == 33600)
+            serial.prints("33.6");
+          else if (qosBps == 28800)
+            serial.prints("28.8");
+          else if (qosBps == 14400)
+            serial.prints("14.4");
+          else if (qosBps == 9600)
+            serial.prints("9.6");
+          else if (qosBps == 2400)
+            serial.prints("2.4");
+          serial.prints(EOLN);
+          result = ZOK;
+        } else if (strcmp((const char *)vbuf, "config") == 0) {
           configMode.switchTo();
           result = ZOK;
         }
@@ -2756,8 +2818,7 @@ ZResult ZCommand::doSerialCommand() {
         else if (strcmp((const char *)vbuf, "clear") == 0) {
           serial.prints("\033[2J\033[H");
           result = ZOK;
-        }
-        else if (strcmp((const char *)vbuf, "about") == 0) {
+        } else if (strcmp((const char *)vbuf, "about") == 0) {
           serial.prints(EOLN);
           serial.prints("AirLink Serial 56K - Super Micro Modem");
           serial.prints(EOLN);
@@ -2773,21 +2834,34 @@ ZResult ZCommand::doSerialCommand() {
           serial.prints(EOLN);
           serial.prints("Modifications:");
           serial.prints(EOLN);
-          serial.prints("- Added AirLink Brand (Based on ESP32-C3 + Buzzer + MAX3232)");
+          serial.prints(
+              "- Added AirLink Brand (Based on ESP32-C3 + Buzzer + MAX3232)");
           serial.prints(EOLN);
-          serial.prints("- Disabled incompatible features and unnecessary commands exclusively for ESP32-C3");
+          serial.prints("- Disabled incompatible features and unnecessary "
+                        "commands exclusively for ESP32-C3");
           serial.prints(EOLN);
           serial.prints("- Modified from retro PC to IBM PC exclusive");
           serial.prints(EOLN);
-          serial.prints("- Added Modem Sound Emulation (Added telephone ringing, DTMF dial tone, modem connection sounds (V.90) and linked them. The actual input address is replaced with DTMF for sound output.)");
+          serial.prints(
+              "- Added Modem Sound Emulation (Added telephone ringing, DTMF "
+              "dial tone, modem connection sounds (V.90) and linked them. The "
+              "actual input address is replaced with DTMF for sound output.)");
           serial.prints(EOLN);
-          serial.prints("- Revamped VT100 based interactive configuration menu (AT+CONFIG)");
+          serial.prints("- Revamped VT100 based interactive configuration menu "
+                        "(AT+CONFIG)");
           serial.prints(EOLN);
-          serial.prints("- Added Korean (EUC-KR) support (Added English/Korean settings)");
+          serial.prints("- Added Korean (EUC-KR) support (Added English/Korean "
+                        "settings)");
+          serial.prints(EOLN);
+          serial.prints("- Added QoS feature for authentic retro speed "
+                        "limiting (AT+QOS)");
           serial.prints(EOLN);
           serial.prints("- Added Help function (AT+HELP)");
           serial.prints(EOLN);
           serial.prints("- Added minor convenience features");
+          serial.prints(EOLN);
+          serial.prints(
+              "- Added QOS mode (56K, 33.6K, 28.8K, 14.4K, 9.6K, 2.4K)");
           serial.prints(EOLN);
           serial.prints(EOLN);
           serial.prints("Apache License 2.0 (Zimodem)");
@@ -2826,10 +2900,16 @@ ZResult ZCommand::doSerialCommand() {
           sprintf(s, "CPU Frequency: %d MHz", ESP.getCpuFreqMHz());
           serial.prints(s);
           serial.prints(EOLN);
+#ifdef ZIMODEM_ESP32
+          sprintf(s, "Core Temperature: %.1f C", temperatureRead());
+          serial.prints(s);
+          serial.prints(EOLN);
+#endif
           sprintf(s, "SDK Version: %s", ESP.getSdkVersion());
           serial.prints(s);
           serial.prints(EOLN);
-          sprintf(s, "WiFi Status: %s", WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
+          sprintf(s, "WiFi Status: %s",
+                  WiFi.status() == WL_CONNECTED ? "Connected" : "Disconnected");
           serial.prints(s);
           serial.prints(EOLN);
           if (WiFi.status() == WL_CONNECTED) {
@@ -2841,8 +2921,7 @@ ZResult ZCommand::doSerialCommand() {
             serial.prints(EOLN);
           }
           result = ZOK;
-        }
-        else if (strcmp((const char *)vbuf, "help") == 0) {
+        } else if (strcmp((const char *)vbuf, "help") == 0) {
           // ── AT+HELP: 전체 AT 명령어 도움말 출력 ──────────────────
           serial.prints(EOLN);
           serial.prints("=== AirLink 56K WiFi Modem - Command Reference ===");
@@ -3031,6 +3110,11 @@ ZResult ZCommand::doSerialCommand() {
                           "\xC8\xAD\xB8\xE9 \xBC\xB3\xC1\xA4 \xB8\xDE\xB4\xBA "
                           "(BBS \xBD\xBA\xC5\xB8\xC0\xCF)");
             serial.prints(EOLN);
+            serial.prints(
+                "AT+QOS=n  : \xC0\xCE\xC5\xCD\xB3\xDD \xBC\xD3\xB5\xB5 "
+                "\xC1\xA6\xC7\xD1 "
+                "(56, 33.6, 28.8, 14.4, 9.6, 2.4, 0:\xB9\xAB\xC1\xA6\xC7\xD1)");
+            serial.prints(EOLN);
             serial.prints("AT+PING\"host\": \xC8\xA3\xBD\xBA\xC6\xAE\xB7\xCE "
                           "\xC7\xCE \xC5\xD7\xBD\xBA\xC6\xAE");
             serial.prints(EOLN);
@@ -3050,9 +3134,12 @@ ZResult ZCommand::doSerialCommand() {
             serial.prints("AT+HELP   : \xC0\xCC \xB5\xB5\xBF\xF2\xB8\xBB "
                           "\xC7\xA5\xBD\xC3");
             serial.prints(EOLN);
-            serial.prints("AT+ABOUT  : \xB8\xF0\xB5\xA9 \xC1\xA4\xBA\xB8 \xB9\xD7 \xC7\xCF\xB5\xE5\xBF\xFE\xBE\xEE \xC1\xA4\xBA\xB8 \xC7\xA5\xBD\xC3");
+            serial.prints("AT+ABOUT  : \xB8\xF0\xB5\xA9 \xC1\xA4\xBA\xB8 "
+                          "\xB9\xD7 \xC7\xCF\xB5\xE5\xBF\xFE\xBE\xEE "
+                          "\xC1\xA4\xBA\xB8 \xC7\xA5\xBD\xC3");
             serial.prints(EOLN);
-            serial.prints("AT+CLEAR  : \xC8\xAD\xB8\xE9 \xC1\xF6\xBF\xEC\xB1\xE2");
+            serial.prints(
+                "AT+CLEAR  : \xC8\xAD\xB8\xE9 \xC1\xF6\xBF\xEC\xB1\xE2");
             serial.prints(EOLN);
           } else {
             serial.prints("--- Basic ---");
@@ -3179,6 +3266,9 @@ ZResult ZCommand::doSerialCommand() {
             serial.prints("--- Special Modes ---");
             serial.prints(EOLN);
             serial.prints("AT+CONFIG : Interactive settings menu");
+            serial.prints(EOLN);
+            serial.prints("AT+QOS=n  : Set QoS bandwidth limit (56, 33.6, "
+                          "28.8, 14.4, 9.6, 2.4, 0:Unlim)");
             serial.prints(EOLN);
             serial.prints("AT+PING\"host\": Ping a host");
             serial.prints(EOLN);
@@ -3738,11 +3828,30 @@ void ZCommand::showInitMessage() {
           ((k ? "\xBF\xAC\xB0\xE1 \xBD\xC7\xC6\xD0: " : "ERROR ON ") + wifiSSI)
               .c_str());
     } else {
-      serial.prints(k ? "\xBF\xCD\xC0\xCC\xC6\xC4\xC0\xCC \xBF\xAC\xB0\xE1 \xBE\xC8\xB5\xCA"
+      serial.prints(k ? "\xBF\xCD\xC0\xCC\xC6\xC4\xC0\xCC \xBF\xAC\xB0\xE1 "
+                        "\xBE\xC8\xB5\xCA"
                       : "WIFI NOT CONNECTED");
     }
   }
   serial.prints(commandMode.EOLN);
+  
+  if (qosBps == 0) {
+    serial.prints(k ? "\xC7\xF6\xC0\xE7 \xB8\xF0\xB5\xA9 \xBF\xA1\xB9\xC4\xB7\xB9\xC0\xCC\xBC\xC7 \xBC\xD3\xB5\xB5: \xB9\xAB\xC1\xA6\xC7\xD1(0)" : "Current Modem Emulation Speed: Unlimited(0)");
+  } else {
+    serial.prints(k ? "\xC7\xF6\xC0\xE7 \xB8\xF0\xB5\xA9 \xBF\xA1\xB9\xC4\xB7\xB9\xC0\xCC\xBC\xC7 \xBC\xD3\xB5\xB5: " : "Current Modem Emulation Speed: ");
+    if (qosBps == 56000) serial.prints("56Kbps");
+    else if (qosBps == 33600) serial.prints("33.6Kbps");
+    else if (qosBps == 28800) serial.prints("28.8Kbps");
+    else if (qosBps == 14400) serial.prints("14.4Kbps");
+    else if (qosBps == 9600) serial.prints("9.6Kbps");
+    else if (qosBps == 2400) serial.prints("2.4Kbps");
+    else {
+      serial.prints(String(qosBps).c_str());
+      serial.prints(" bps");
+    }
+  }
+  serial.prints(commandMode.EOLN);
+
   serial.prints(k ? "\xC1\xD8\xBA\xF1 \xBF\xCF\xB7\xE1." : "READY.");
   serial.prints(commandMode.EOLN);
   serial.flush();
