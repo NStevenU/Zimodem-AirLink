@@ -16,6 +16,9 @@
 > 🇰🇷 **Note for International Users:** 
 > This firmware is highly optimized for the Korean environment. While English is fully supported, please note that Korean is set as the default language.
 
+**중요한 점**으로 이 펌웨어는 단순히 개인적인 용도로 프로젝트를 만들어 만든 것이기 때문에 최종 완성본이 아니며, 각종 문제 또는 미숙한 부분, 버그등이 발생할 수 있습니다.
+또한 수정되거나 추가된 기능 대비 설명이 부족한 부분도 있습니다.
+
 ## ✨ Key Modifications & Features
 * **최신 개발 환경 대응**: 최신 Arduino IDE, ESP-IDF v5.0 이상 대응
 * **AirLink 브랜드 적용**: ESP32-C3, MAX3232, Buzzer를 결합한 하드웨어에 사용할 브랜드 적용(그래야지 진짜 물건같고 있어보이잖아요?ㅎㅎ)
