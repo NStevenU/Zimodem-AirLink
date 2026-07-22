@@ -71,12 +71,27 @@
 | **PWR LED** | 전원 표시 | 하드웨어 직결 권장 |
 | **AA/OTH** | Auto Answer / Pulse Dial 핀 | `GPIO 0` / `GPIO 7` |
 
-### 3. 하드웨어 자재 및 제작 레퍼런스 (Hardware Build & Reference)
+### 3. 아두이노 펌웨어 업로드 가이드 (Arduino Firmware Upload)
+AirLink 펌웨어를 ESP32-C3 모듈에 빌드 및 업로드하기 위한 Arduino IDE 설정 방법입니다.
+
+1. **사전 준비 사항**
+   * **Arduino IDE**: `v2.3.10` 설치
+   * **esp32 보드 패키지**: `v3.3.10` 설치 (`툴 -> 보드 -> 보드 매니저`에서 `esp32` 검색 후 `3.3.10` 버전 선택 및 설치)
+2. **프로젝트 열기**
+   * 펌웨어 소스코드 전체를 다운로드한 후, `zimodem/zimodem.ino` 파일을 열어줍니다.
+3. **Arduino IDE 보드 설정 (`툴` 메뉴)**
+   * **보드 (Board)**: `ESP32C3 Dev Module`
+   * **USB CDC On Boot**: `Enabled`
+   * **CPU Frequency**: `160MHz (WiFi)`
+   * **Erase All Flash Before Sketch Upload**: `Enabled` *(※ 단, 최초 업로드 이후 단순 업데이트 시에는 `Disabled`)*
+   * **Partition Scheme**: `Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)` *(※ 펌웨어 및 SPIFFS 파티션을 위해 반드시 **4MB Flash 버전**의 ESP32-C3 모듈을 사용해야 합니다)*
+
+### 4. 하드웨어 자재 및 제작 레퍼런스 (Hardware Build & Reference)
 자체 제작 시 사용된 주요 자재와 만능기판 배선, 조립 및 완제품 사진 레퍼런스입니다.<br/>
 3D 프린팅 케이스는 3d case폴더 내에 stl파일로 존재하니 다운받아 출력하시면 됩니다.
 
 #### 📦 주요 사용 자재
-* **MCU**: ESP32-C3 Super Mini
+* **MCU**: ESP32-C3 Super Mini (4MB Flash 버전 필수)
 * **시리얼 변환기**: MAX3232 (RS232 to TTL)
 * **오디오**: 수동 부저 (Buzzer)
 * **상태 표시등**: 5파이 LED 3개 (PWR, RX/TX, WIFI)
@@ -224,7 +239,7 @@
 * `zstream.ino`: 일반 ATDT 통신 모드(BBS) 시에도 Token Bucket 기반 속도 제한(QoS) 적용.
 
 ## 🛠️ Hardware Requirements
-* **Microcontroller**: ESP32-C3 Super Mini
+* **Microcontroller**: ESP32-C3 Super Mini (4MB Flash required)
 * **Serial Communication**: MAX3232 (RS232 to TTL)
 * **Audio**: Buzzer (for Sound Emulation)
 * **Status LEDs**: 5mm LED 3개 (PWR, RXTX, WIFI)
