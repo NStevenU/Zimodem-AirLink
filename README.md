@@ -71,6 +71,42 @@
 | **PWR LED** | 전원 표시 | 하드웨어 직결 권장 |
 | **AA/OTH** | Auto Answer / Pulse Dial 핀 | `GPIO 0` / `GPIO 7` |
 
+### 3. 하드웨어 자재 및 제작 레퍼런스 (Hardware Build & Reference)
+자체 제작 시 사용된 주요 자재와 만능기판 배선, 조립 및 완제품 사진 레퍼런스입니다.
+3D 프린팅 케이스는 3d case폴더 내에 stl파일로 존재하니 다운받아 출력하시면 됩니다.
+
+#### 📦 주요 사용 자재
+* **MCU**: ESP32-C3 Super Mini
+* **시리얼 변환기**: MAX3232 (RS232 to TTL)
+* **오디오**: 수동 부저 (Buzzer)
+* **상태 표시등**: 5파이 LED 3개 (PWR, RX/TX, WIFI)
+
+#### 📐 회로 설계 & 만능기판 배선
+만능기판을 활용한 핀 배선 및 설계 레이아웃 예시입니다.<br/>
+![회로 설계](image/23.jpg)
+
+#### 🔌 실제 만능기판 실장
+실제 만능기판 부품 배치 및 납땜 실장 모습입니다.<br/>
+![만능기판 실장 1](image/24.jpg)<br/>
+![만능기판 실장 2](image/25.jpg)
+
+#### 📦 케이스 및 내부 조립
+케이스 외관 및 내부 조립 배치 사진입니다.<br/>
+![케이스 사진](image/26.jpg)<br/>
+![조립 내부 사진](image/27.jpg)
+
+#### 🎨 전체 디자인 및 외관
+완성된 AirLink 56K 모뎀의 디자인 모습입니다.<br/>
+![전체 디자인 1](image/28.jpg)<br/>
+![전체 디자인 2](image/29.jpg)<br/>
+![전체 디자인 3](image/30.jpg)<br/>
+![전체 디자인 4](image/31.jpg)<br/>
+![전체 디자인 5](image/32.jpg)
+
+#### 💡 작동 및 LED 동작
+전원 및 데이터 송수신(RXTX), WiFi 상태 LED 동작 모습입니다.<br/>
+![작동 및 LED 동작](image/33.jpg)
+
 ## 📖 사용 방법 (How to Use)
 **※ 본 가이드는 Windows 9X (사진은 Windows 95) 환경을 기준으로 작성되었습니다.**
 
@@ -186,9 +222,10 @@
 * `zstream.ino`: 일반 ATDT 통신 모드(BBS) 시에도 Token Bucket 기반 속도 제한(QoS) 적용.
 
 ## 🛠️ Hardware Requirements
-* **Microcontroller**: ESP32-C3
+* **Microcontroller**: ESP32-C3 Super Mini
 * **Serial Communication**: MAX3232 (RS232 to TTL)
 * **Audio**: Buzzer (for Sound Emulation)
+* **Status LEDs**: 5mm LED 3개 (PWR, RXTX, WIFI)
 
 ## 📜 Credits & License
 * **Developer**: NSteven, Republic of Korea ([GitHub](https://github.com/NStevenU/))
