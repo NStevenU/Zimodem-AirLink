@@ -537,18 +537,12 @@ void ZPPPMode::sendPacketToSerial(struct pbuf *p)
   if(p == NULL || state != PPP_OPENED || !ipcpOpened)
     return;
 
-  if (qosBps > 0) {
-    unsigned long now = millis();
-    unsigned long elapsed = now - qosLastTime;
-    if (elapsed > 0) {
-      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
-      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
-      qosLastTime = now;
-    }
-    if (qosTokens < p->tot_len) {
-      return; // DROP PACKET (Tail Drop)
-    }
-    qosTokens -= p->tot_len;
+  // Drop packet only if serial output buffer doesn't have enough room.
+  // Standard IP MTU is 1500; with framing and escaping, typical expansion is <10-20%.
+  int estimatedFrameSize = p->tot_len + (p->tot_len / 4) + 64;
+  if(serialOutBufferBytesRemaining() < estimatedFrameSize)
+  {
+    return;
   }
 
   struct pbuf *q = p;
@@ -559,14 +553,17 @@ void ZPPPMode::sendPacketToSerial(struct pbuf *p)
   {
     uint8_t *payload = (uint8_t *)q->payload;
     int len = q->len;
-    memcpy(tempBuf + total, payload, len);
-    total += len;
+    if(total + len <= (int)sizeof(tempBuf))
+    {
+      memcpy(tempBuf + total, payload, len);
+      total += len;
+    }
     q = q->next;
   }
 
   if(total >= 20)
   {
-    // Removed debugPrintf for PPP-RX IP packet
+    // IP packet
   }
 
   sendPPPFrame(PPP_PROTOCOL_IP, tempBuf, total);
@@ -577,19 +574,7 @@ void ZPPPMode::injectPacketToNetwork(uint8_t *data, int len)
   if(len < 20)
     return;
 
-  if (qosBps > 0) {
-    unsigned long now = millis();
-    unsigned long elapsed = now - qosLastTime;
-    if (elapsed > 0) {
-      qosTokens += (float)elapsed * ((float)qosBps / 8000.0);
-      if (qosTokens > (float)(qosBps / 8)) qosTokens = (float)(qosBps / 8);
-      qosLastTime = now;
-    }
-    if (qosTokens < len) {
-      return; // DROP PACKET (Tail Drop)
-    }
-    qosTokens -= len;
-  }
+  // QoS packet drop removed. Byte-level pacing is used instead.
 
   // Removed debugPrintf for PPP-TX IP packet
 
@@ -637,11 +622,12 @@ void ZPPPMode::switchBackToCommandMode()
 void ZPPPMode::switchTo()
 {
   debugPrintf("\r\nMode:PPP\r\n");
-  sserial.setFlowControlType(FCT_DISABLED);
-  if(commandMode.getFlowControlType()==FCT_RTSCTS)
-    sserial.setFlowControlType(FCT_RTSCTS);
+  sserial.setFlowControlType(commandMode.getFlowControlType());
   sserial.setPetsciiMode(false);
   sserial.setXON(true);
+
+  if(pinSupport[pinDTR])
+    lastDTR = digitalRead(pinDTR);
 
   this->curBufLen = 0;
   this->escaped = false;
@@ -724,6 +710,23 @@ void ZPPPMode::serialIncoming()
     if(logFileOpen)
       logSerialIn(c);
 
+    // Software flow control (XON / XOFF) handling in PPP mode
+    if(sserial.getFlowControlType() == FCT_NORMAL)
+    {
+      if(c == 19) // XOFF (DC3)
+      {
+        debugPrintf("\n[PPP: Received XOFF]\n");
+        sserial.setXON(false);
+        continue;
+      }
+      else if(c == 17) // XON (DC1)
+      {
+        debugPrintf("\n[PPP: Received XON]\n");
+        sserial.setXON(true);
+        continue;
+      }
+    }
+
     if(this->buf == 0)
     {
       this->buf = (uint8_t *)malloc(4096);
@@ -761,32 +764,28 @@ void ZPPPMode::serialIncoming()
 
     if(this->curBufLen >= this->maxBufSize)
     {
-      int newSize = this->maxBufSize * 2;
-      if(newSize > 65536)
-      {
-        debugPrintf("PPP: packet too large, discarding\n");
-        this->curBufLen = 0;
-        this->escaped = false;
-      }
-      else
-      {
-        uint8_t *newBuf = (uint8_t *)malloc(newSize);
-        if(newBuf != NULL)
-        {
-          memcpy(newBuf, this->buf, this->curBufLen);
-          maxBufSize = newSize;
-          free(this->buf);
-          this->buf = newBuf;
-        }
-        else
-          this->curBufLen = 0;
-      }
+      // Frame exceeded max MTU (likely missing 0x7E delimiter due to line noise) - discard
+      this->curBufLen = 0;
+      this->escaped = false;
     }
   }
 }
 
 void ZPPPMode::loop()
 {
+  if((streamMode.getHangupType() == HANGUP_DTR) && pinSupport[pinDTR])
+  {
+    int curDTR = digitalRead(pinDTR);
+    if((lastDTR == dtrActive) && (curDTR == dtrInactive) && (dtrInactive != dtrActive))
+    {
+      lastDTR = curDTR;
+      debugPrintf("PPP: Hangup (DTR drop)\r\n");
+      switchBackToCommandMode();
+      return;
+    }
+    lastDTR = curDTR;
+  }
+
   if(checkPlusPlusPlusEscape())
   {
     switchBackToCommandMode();

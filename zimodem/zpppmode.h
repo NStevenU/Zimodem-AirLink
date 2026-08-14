@@ -53,6 +53,7 @@ private:
 
   struct netif ppp_netif;
   struct netif *wifi_netif = NULL;
+  int lastDTR = 0;
 
   void sendLCPPacket(uint8_t code, uint8_t id, uint8_t *data, int len);
   void sendIPCPPacket(uint8_t code, uint8_t id, uint8_t *data, int len);

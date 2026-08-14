@@ -18,7 +18,7 @@
 
 #define DBG_BYT_CTR 20
 
-#define SER_WRITE_BUFSIZE 4096
+#define SER_WRITE_BUFSIZE 32768
 
 enum FlowControlType
 {
