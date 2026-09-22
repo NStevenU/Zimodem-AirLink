@@ -1,6 +1,5 @@
-; AIRLINK_HW.INF
-; Windows 95, 98, ME, NT 4.0, 2000, XP Modem Installation File
-; Device: AirLink 56K (RTS/CTS)
+; AIRLINK.INF
+; Windows 95, 98, ME, NT 4.0, 2000, XP Unified INF for AirLink 56K WiFi Modem
 ; Reference Architecture: U.S. Robotics 56K Faxmodem External (USR5686E)
 ; Firmware Target: Zimodem (ESP32-C3)
 ; Copyright (C) 2026 Nexisson Tech Co., Ltd.
@@ -18,15 +17,20 @@ DriverVer   = 09/23/2026, 1.0.0.0
 ; Windows 95, 98, ME, NT 4.0, 2000
 [AirLink]
 %AirLink56K_HW% = Modem_AirLink56K_HW, UNIMODEM_AIRLINK_HW
+%AirLink56K_SW% = Modem_AirLink56K_SW, UNIMODEM_AIRLINK_SW
 
 ; Windows XP (NT 5.1) 32-bit
 [AirLink.NT.5.1]
 %AirLink56K_HW% = Modem_AirLink56K_HW, UNIMODEM_AIRLINK_HW
+%AirLink56K_SW% = Modem_AirLink56K_SW, UNIMODEM_AIRLINK_SW
 
 ; --- Installation Sections ---
 
 [Modem_AirLink56K_HW]
 AddReg = All, Common, Modem_AirLink56K_HW.AddReg, Settings_AirLink_HW, External, Responses_AirLink
+
+[Modem_AirLink56K_SW]
+AddReg = All, Common, Modem_AirLink56K_SW.AddReg, Settings_AirLink_SW, External, Responses_AirLink
 
 ; --- Windows Core (VxD, DLL & Housing) ---
 
@@ -82,7 +86,7 @@ HKR, Settings, ErrorControl_Forced,, ""
 HKR, Settings, Compression_Off,, ""
 HKR, Settings, Compression_On,, ""
 
-; --- Hardware Flow Control Settings (RTS/CTS) ---
+; --- Hardware Flow Control Model (RTS/CTS) ---
 
 [Modem_AirLink56K_HW.AddReg]
 ; Properties (24 bytes): Max DTE=115200 (00,C2,01,00), Max DCE=56000 (60,EA,00,00), SpeakerVolume=0
@@ -92,6 +96,20 @@ HKR,, InactivityScale, 1, 0a,00,00,00
 [Settings_AirLink_HW]
 HKR, Init, 1,, "AT<cr>"
 HKR, Init, 2,, "ATE0Q0V1&K3<cr>"
+HKR, Settings, FlowControl_Hard,, "&K3"
+HKR, Settings, FlowControl_Soft,, "&K4"
+HKR, Settings, FlowControl_Off,, "&K0"
+
+; --- Software Flow Control Model (XON/XOFF) ---
+
+[Modem_AirLink56K_SW.AddReg]
+; Properties (24 bytes): Max DTE=115200 (00,C2,01,00), Max DCE=56000 (60,EA,00,00), SpeakerVolume=0
+HKR,, Properties, 1, 80,01,00,00, FF,00,00,00, FF,00,00,00, 00,00,00,00, 07,00,00,00, F7,03,00,00, 00,C2,01,00, 60,EA,00,00
+HKR,, InactivityScale, 1, 0a,00,00,00
+
+[Settings_AirLink_SW]
+HKR, Init, 1,, "AT<cr>"
+HKR, Init, 2,, "ATE0Q0V1&K4<cr>"
 HKR, Settings, FlowControl_Hard,, "&K3"
 HKR, Settings, FlowControl_Soft,, "&K4"
 HKR, Settings, FlowControl_Off,, "&K0"
@@ -145,3 +163,4 @@ HKR, Responses, "28<cr>", 1, 02, 00, 00,c2,01,00, 00,00,00,00 ; CONNECT 115200
 [Strings]
 Mfg            = "Nexisson Tech Co., Ltd."
 AirLink56K_HW  = "AirLink 56K (RTS/CTS)"
+AirLink56K_SW  = "AirLink 56K (XON/XOFF)"
